@@ -1,0 +1,195 @@
+/* Football GM — BBGM-inspired dark UI */
+:root {
+  --bg: #12161c;
+  --bg2: #1a2029;
+  --bg3: #222a36;
+  --border: #2e3846;
+  --text: #dbe4ee;
+  --text-dim: #8b98a8;
+  --accent: #36a2f5;
+  --green: #3ecf6e;
+  --red: #f05555;
+  --gold: #f0c355;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* Topbar */
+#topbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 14px; background: var(--bg2); border-bottom: 1px solid var(--border);
+  flex-shrink: 0; gap: 10px; flex-wrap: wrap;
+}
+.topbar-left { display: flex; align-items: center; gap: 12px; }
+.logo { font-size: 16px; }
+.top-team { color: var(--text-dim); }
+.top-status { color: var(--text-dim); margin-right: 12px; }
+.topbar-right { display: flex; align-items: center; }
+#nav-toggle { display: none; background: none; border: none; color: var(--text); font-size: 20px; cursor: pointer; }
+
+/* Buttons */
+.btn {
+  background: var(--bg3); color: var(--text); border: 1px solid var(--border);
+  padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px;
+}
+.btn:hover { background: #2b3545; }
+.btn-play { background: var(--green); color: #08240f; font-weight: 700; border: none; padding: 8px 18px; font-size: 14px; }
+.btn-play:hover { background: #55e086; }
+.btn-danger { background: #5a2323; border-color: #7a3030; }
+.btn-danger:hover { background: #732c2c; }
+.btn-small { padding: 2px 8px; font-size: 12px; }
+.btn-accent { background: var(--accent); color: #06121e; border: none; font-weight: 600; }
+.btn-accent:hover { background: #5cb5f8; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Play menu */
+.play-menu { position: relative; }
+.play-dropdown {
+  position: absolute; right: 0; top: 110%; background: var(--bg3);
+  border: 1px solid var(--border); border-radius: 6px; min-width: 230px; z-index: 60;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5); overflow: hidden;
+}
+.play-dropdown button {
+  display: block; width: 100%; text-align: left; background: none; border: none;
+  color: var(--text); padding: 10px 14px; cursor: pointer; font-size: 13px;
+}
+.play-dropdown button:hover { background: var(--accent); color: #06121e; }
+
+/* Layout */
+#main { display: flex; flex: 1; overflow: hidden; }
+#sidebar {
+  width: 190px; background: var(--bg2); border-right: 1px solid var(--border);
+  padding: 10px 0; flex-shrink: 0; overflow-y: auto;
+}
+#sidebar a {
+  display: block; padding: 9px 16px; color: var(--text-dim); font-size: 13.5px;
+}
+#sidebar a:hover { background: var(--bg3); color: var(--text); text-decoration: none; }
+#sidebar a.active { background: var(--bg3); color: var(--text); border-left: 3px solid var(--accent); padding-left: 13px; }
+#content { flex: 1; overflow-y: auto; padding: 18px 22px 60px; }
+
+h1 { font-size: 21px; margin-bottom: 4px; }
+h2 { font-size: 16px; margin: 18px 0 8px; }
+.sub { color: var(--text-dim); margin-bottom: 14px; font-size: 13px; }
+
+/* Cards */
+.cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }
+.card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 16px; min-width: 260px; flex: 1;
+}
+.card h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-dim); margin-bottom: 10px; }
+.card .big { font-size: 22px; font-weight: 700; }
+
+/* Tables */
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 5px 9px; text-align: left; white-space: nowrap; }
+th {
+  color: var(--text-dim); font-weight: 600; border-bottom: 2px solid var(--border);
+  cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--bg);
+}
+th.sorted { color: var(--accent); }
+td { border-bottom: 1px solid #1e2530; }
+tr:hover td { background: #1c232e; }
+td.num, th.num { text-align: right; }
+.pos-badge {
+  display: inline-block; min-width: 28px; text-align: center; padding: 1px 4px;
+  border-radius: 3px; font-size: 11px; font-weight: 700;
+}
+.pos-GK { background: #6a4a12; color: #ffd57e; }
+.pos-DF { background: #14405c; color: #8fd4ff; }
+.pos-MF { background: #1c4d26; color: #8fe8a5; }
+.pos-FW { background: #5c1a1a; color: #ff9d9d; }
+.ovr { font-weight: 700; }
+.ovr-elite { color: #b57bff; }
+.ovr-great { color: #4fc3f7; }
+.ovr-good { color: #66d97a; }
+.ovr-ok { color: #d9c766; }
+.ovr-poor { color: #9aa5b1; }
+.user-row td { background: rgba(54,162,245,.08); }
+.zone-cl td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.zone-rel td:first-child { box-shadow: inset 3px 0 0 var(--red); }
+
+.player-link, .team-link { cursor: pointer; color: var(--accent); }
+.player-link:hover, .team-link:hover { text-decoration: underline; }
+
+.form-str span { display: inline-block; width: 16px; text-align: center; border-radius: 3px; margin-right: 2px; font-size: 11px; font-weight: 700; }
+.form-W { background: #1d5c2e; color: #7ef0a0; }
+.form-D { background: #4d4a1c; color: #eee08a; }
+.form-L { background: #5c1d1d; color: #ff9d9d; }
+
+/* News */
+.news-item { padding: 8px 0; border-bottom: 1px solid #1e2530; font-size: 13px; }
+.news-item .date { color: var(--text-dim); margin-right: 8px; font-size: 12px; }
+
+/* Match rows */
+.match-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid #1e2530; cursor: pointer; border-radius: 4px; }
+.match-row:hover { background: #1c232e; }
+.match-row .score { font-weight: 700; min-width: 46px; text-align: center; background: var(--bg3); border-radius: 4px; padding: 2px 6px; }
+.match-row .team-name { flex: 1; }
+.match-row .team-name.right { text-align: right; }
+.match-row .win { color: var(--green); }
+
+/* Modal */
+#modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 100;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+#modal {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+  max-width: 780px; width: 100%; max-height: 88vh; overflow-y: auto;
+  padding: 22px; position: relative;
+}
+#modal-close {
+  position: absolute; top: 10px; right: 12px; background: none; border: none;
+  color: var(--text-dim); font-size: 17px; cursor: pointer;
+}
+#modal-close:hover { color: var(--text); }
+.hidden { display: none !important; }
+
+/* Attribute bars */
+.attr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 18px; margin: 10px 0; }
+.attr { font-size: 12px; }
+.attr .label { display: flex; justify-content: space-between; color: var(--text-dim); }
+.attr .bar { height: 6px; background: var(--bg3); border-radius: 3px; margin-top: 3px; }
+.attr .fill { height: 100%; border-radius: 3px; background: var(--accent); }
+
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; margin-left: 6px; }
+.badge-gold { background: #55450f; color: var(--gold); }
+.badge-inj { background: #5c1d1d; color: #ff9d9d; }
+.badge-listed { background: #14405c; color: #8fd4ff; }
+.badge-loan { background: #3a2a55; color: #cdaaff; }
+
+.flex { display: flex; gap: 14px; flex-wrap: wrap; }
+.flex > div { flex: 1; min-width: 300px; }
+.controls { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; align-items: center; }
+select, input[type=text], input[type=number] {
+  background: var(--bg3); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 5px 8px; font-size: 13px;
+}
+.money { color: var(--green); }
+.neg { color: var(--red); }
+.mute { color: var(--text-dim); }
+
+.team-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; border: 1px solid rgba(255,255,255,.25); }
+
+.event-line { padding: 3px 0; font-size: 13px; }
+.event-min { display: inline-block; width: 34px; color: var(--text-dim); }
+
+@media (max-width: 760px) {
+  #nav-toggle { display: block; }
+  #sidebar { position: fixed; left: 0; top: 49px; bottom: 0; z-index: 50; transform: translateX(-100%); transition: transform .2s; }
+  #sidebar.open { transform: translateX(0); }
+  #content { padding: 12px 10px 60px; }
+}
