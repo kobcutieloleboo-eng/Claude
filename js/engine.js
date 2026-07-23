@@ -762,13 +762,16 @@ function save() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) { /* quota */ }
 }
 function load() {
-  if (typeof localStorage === "undefined") return false;
-  const raw = localStorage.getItem(SAVE_KEY);
-  if (!raw) return false;
-  try { state = JSON.parse(raw); return true; } catch (e) { return false; }
+  try {
+    if (typeof localStorage === "undefined") return false;
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return false;
+    state = JSON.parse(raw);
+    return true;
+  } catch (e) { return false; }
 }
 function reset() {
-  if (typeof localStorage !== "undefined") localStorage.removeItem(SAVE_KEY);
+  try { if (typeof localStorage !== "undefined") localStorage.removeItem(SAVE_KEY); } catch (e) { /* blocked */ }
   state = null;
 }
 function exportJSON() { return JSON.stringify(state); }
