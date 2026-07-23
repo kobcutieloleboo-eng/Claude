@@ -17,17 +17,28 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 
 ## What's in the box
 
-**Real players & teams**
-- All 20 Premier League clubs from the 2025-26 season with hand-rated squads (~430 real players: rating, potential, age, position, nationality), reflecting the summer 2025 transfer window (Wirtz & Isak at Liverpool, Gyökeres at Arsenal, Sesko at United, …)
-- A pool of real EFL clubs (Leicester, Southampton, Sheffield United, …) that rotate up via promotion/relegation
+**Real players & teams — five playable leagues**
+- Premier League, La Liga, Serie A, Bundesliga and Ligue 1, all with hand-rated real 2025-26 squads (~1,100 real players), reflecting the summer 2025 window (Wirtz & Isak at Liverpool, Mbappé's Madrid, Kane's Bayern, …)
+- ~30 more real clubs in non-playable leagues (Porto, Ajax, Galatasaray, Al Nassr with Ronaldo, Inter Miami with Messi, Neymar's Santos, …) that hold real players, join the Champions League, and sell to anyone — the whole world is your transfer market
+- Per-league promotion/relegation with pools of real lower-division clubs
 
-**Real career trajectories**
+**Champions League**
+- 32 teams: top four from each playable league plus Europe's best non-playable clubs
+- Real format feel: 8 groups of 4 played midweek between league rounds, then R16 → final (single-leg knockouts), with prize money, news, and history
+
+**Era starts: play from any season back to 2000**
+- Start in 2000 and manage prime Zidane, Henry, Ronaldinho, Maldini, Buffon — 200+ hand-added legends with real career timelines
+- Real debuts fire on schedule: start in 2000 and Cristiano Ronaldo breaks through at Sporting in 2002, Messi at Barça in 2004…
+- Real transfers follow history too (Zidane joins Madrid in 2001) — until *you* change history by signing someone first. If history says a player joins *your* club, he agitates for the move and you get first refusal.
+
+**Career trajectories**
 - Players develop along age curves toward their potential — teenagers bloom, players peak in their late 20s, decline in their 30s (keepers age slower), and retire
 - Season-by-season career history on every player page: club, apps, goals, assists, rating year over year
 - Youth academies produce new prospects every season with nationality-appropriate names — including the occasional wonderkid
 
 **BBGM-style convenience**
-- Play menu: sim next match, a matchday, a month, or the whole season in one click
+- Play menu: sim a week, a month, or the whole season in one click — with W/D/L result notifications after every simmed week
+- Mobile-friendly: bottom tab bar, touch-sized controls, responsive tables
 - Sortable tables everywhere; every player and club name is clickable
 - Autosave to localStorage + JSON export/import for backups
 - God mode: switch clubs anytime from Settings
@@ -44,12 +55,16 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 
 ```
 index.html        app shell
-css/style.css     dark BBGM-inspired UI
-js/players.js     real teams + hand-rated 2025-26 player database
-js/names.js       name pools by nationality for youth regens
-js/engine.js      game engine (sim, development, transfers) — DOM-free
+css/style.css     dark BBGM-inspired UI (desktop + mobile)
+js/players.js     Premier League 2025-26 squads + EFL promotion pool
+js/leagues1.js    La Liga & Serie A squads + pools
+js/leagues2.js    Bundesliga & Ligue 1 squads + pools
+js/world.js       non-playable-league clubs (transfer market + CL guests)
+js/legends.js     200+ legends with career stints; career paths for modern players
+js/names.js       name pools by nationality for generated players
+js/engine.js      game engine (world, CL, sim, development, transfers) — DOM-free
 js/app.js         views, routing, actions
-test/smoke.js     headless multi-season simulation test
+test/smoke.js     headless multi-season + era-start simulation test
 ```
 
 ## Testing
@@ -60,15 +75,15 @@ The engine runs headless under Node:
 node test/smoke.js 5   # simulate 5 full seasons, verify invariants
 ```
 
-Checks schedule integrity, realistic goal rates (~2.5–2.9/match), sane champion point totals, promotion/relegation bookkeeping, transfers, persistence round-trips, and career-history recording.
+Checks league/schedule integrity across all five leagues, realistic goal rates, Champions League completion, promotion/relegation bookkeeping, cross-league transfers, persistence round-trips — plus an era-start scenario asserting Zidane starts 2000 at Juve and follows history to Madrid, and that Messi and Ronaldo debut on schedule.
 
 ## Roadmap ideas
 
-- Cup competitions (FA Cup, Champions League group → knockout)
+- Domestic cups (FA Cup, Copa del Rey) and the Europa League
 - Formation/tactics choices (4-4-2, 3-5-2, pressing intensity)
 - Live match ticker with minute-by-minute events
-- Multiple leagues (La Liga, Serie A, Bundesliga) and cross-league transfers
-- Back-filled pre-2025 career histories for real players
+- Two-legged Champions League knockouts, coefficient-based qualification
+- Deeper era data (more legends, back-filled pre-start career stats)
 
 ---
 

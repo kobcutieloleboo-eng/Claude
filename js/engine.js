@@ -1,30 +1,42 @@
-// Football GM engine — league state, match sim, player development, transfers.
+// Football GM engine v2 — multi-league world, Champions League, era starts (2000-2025),
+// real career timelines, match sim, development, transfers.
 // No DOM dependencies: also runs headless under Node for testing.
 
-/* global START_SEASON, REAL_TEAMS, PROMOTION_POOL, NAME_POOLS, randomNationality, randomName */
+/* global START_SEASON, REAL_TEAMS, PROMOTION_POOL, NAME_POOLS, randomNationality, randomName,
+   LALIGA_TEAMS, LALIGA_POOL, SERIEA_TEAMS, SERIEA_POOL, BUNDES_TEAMS, BUNDES_POOL,
+   LIGUE1_TEAMS, LIGUE1_POOL, FOREIGN_CLUBS, LEGENDS, STINT_OVERRIDES */
 
 (function (root) {
 "use strict";
 
 if (typeof module !== "undefined" && typeof require !== "undefined") {
-  const n = require("./names.js");
-  const d = require("./players.js");
-  root.NAME_POOLS = n.NAME_POOLS; root.randomNationality = n.randomNationality; root.randomName = n.randomName;
-  root.START_SEASON = d.START_SEASON; root.REAL_TEAMS = d.REAL_TEAMS; root.PROMOTION_POOL = d.PROMOTION_POOL;
+  Object.assign(root, require("./names.js"), require("./players.js"), require("./leagues1.js"),
+    require("./leagues2.js"), require("./world.js"), require("./legends.js"));
 }
 
-const ROUNDS = 38;
-const SAVE_KEY = "footballGM_save_v1";
+const WEEKS = 38;
+const SAVE_KEY = "footballGM_save_v2";
+const MIN_START = 2000, MAX_START = 2025;
 
-// ---------- RNG ----------
+const LEAGUE_DEFS = [
+  { id: "EPL", name: "Premier League", country: "England", teams: () => REAL_TEAMS, pool: () => PROMOTION_POOL },
+  { id: "LIGA", name: "La Liga", country: "Spain", teams: () => LALIGA_TEAMS, pool: () => LALIGA_POOL },
+  { id: "SA", name: "Serie A", country: "Italy", teams: () => SERIEA_TEAMS, pool: () => SERIEA_POOL },
+  { id: "BL", name: "Bundesliga", country: "Germany", teams: () => BUNDES_TEAMS, pool: () => BUNDES_POOL },
+  { id: "L1", name: "Ligue 1", country: "France", teams: () => LIGUE1_TEAMS, pool: () => LIGUE1_POOL },
+];
+const CL_GROUP_WEEKS = [2, 5, 8, 11, 14, 17];
+const CL_KO_WEEKS = { r16: 21, qf: 26, sf: 31, final: 35 };
+
+// ---------- RNG & utils ----------
 let rngState = Date.now() >>> 0;
-function rand() { // mulberry32
+function rand() {
   rngState |= 0; rngState = (rngState + 0x6D2B79F5) | 0;
   let t = Math.imul(rngState ^ (rngState >>> 15), 1 | rngState);
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
-function ri(a, b) { return a + Math.floor(rand() * (b - a + 1)); } // inclusive
+function ri(a, b) { return a + Math.floor(rand() * (b - a + 1)); }
 function choice(arr) { return arr[Math.floor(rand() * arr.length)]; }
 function shuffle(arr) {
   const a = arr.slice();
@@ -39,7 +51,7 @@ function poisson(lambda) {
 }
 function hashCode(s) {
   let h = 0;
-  for (let i = 0; i < s.length; i++) { h = (Math.imul(31, h) + s.charCodeAt(i)) | 0; }
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
   return Math.abs(h);
 }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -69,10 +81,10 @@ function fit(slot, pos) {
 
 // ---------- State ----------
 let state = null;
-
 function newPid() { return state.nextPid++; }
+function newTid() { return state.nextTid++; }
 
-function wageFor(ovr) { return Math.max(5, Math.round(1.4 * Math.pow(1.125, ovr - 50))); } // £k/week
+function wageFor(ovr) { return Math.max(5, Math.round(1.4 * Math.pow(1.125, ovr - 50))); }
 
 function playerValue(p) {
   let v = 0.35 * Math.pow(1.155, p.ovr - 50);
@@ -87,95 +99,205 @@ function playerValue(p) {
 
 function makePlayer(name, pos, age, ovr, pot, natl, tid, opts) {
   opts = opts || {};
-  const p = {
+  return {
     pid: newPid(), name, pos, age, natl, ovr, pot: Math.max(pot, ovr), tid,
     wage: wageFor(ovr), years: opts.years || ri(1, 4),
     listed: false, injury: 0, youth: !!opts.youth, retired: false,
     stats: blankStats(), career: [],
   };
-  return p;
 }
 function blankStats() { return { apps: 0, goals: 0, assists: 0, cs: 0 }; }
 
+// Age curve for real players placed in historical eras.
+function ovrAtAge(peak, age, pos, name) {
+  const shift = pos === "GK" ? 2 : 0;
+  const a = age - shift;
+  let d;
+  if (a <= 17) d = -17; else if (a === 18) d = -15; else if (a === 19) d = -12;
+  else if (a === 20) d = -9; else if (a === 21) d = -7; else if (a === 22) d = -5;
+  else if (a === 23) d = -3; else if (a === 24) d = -2; else if (a === 25) d = -1;
+  else if (a <= 29) d = 0; else if (a === 30) d = -1; else if (a === 31) d = -3;
+  else if (a === 32) d = -5; else if (a === 33) d = -8; else if (a === 34) d = -11;
+  else if (a === 35) d = -14; else d = -17 - (a - 36) * 3;
+  const noise = (hashCode(name || "") % 3) - 1;
+  return clamp(peak + d + noise, 42, 99);
+}
+
+function uniqueName(natl) {
+  for (let i = 0; i < 6; i++) {
+    const n = randomName(natl, rand);
+    if (!Object.values(state.players).some(p => p.name === n)) return n;
+  }
+  return randomName(natl, rand) + " Jr";
+}
+
 function generateYouth(tid, stature) {
-  const natl = rand() < 0.5 ? "England" : randomNationality(rand);
+  const natl = rand() < 0.4 ? nativeNationality(tid) : randomNationality(rand);
   const pos = choice(["GK", "CB", "CB", "LB", "RB", "DM", "CM", "CM", "AM", "LW", "RW", "ST", "ST"]);
   const age = ri(16, 18);
   const ovr = ri(46, 58) + Math.round(stature * 1.5);
   let potBonus = ri(6, 22);
-  if (rand() < 0.12) potBonus += ri(8, 18); // gem
+  if (rand() < 0.12) potBonus += ri(8, 18);
   const pot = clamp(ovr + potBonus, ovr, 94);
-  return makePlayer(randomName(natl, rand), pos, age, ovr, pot, natl, tid, { youth: true, years: ri(2, 4) });
+  return makePlayer(uniqueName(natl), pos, age, ovr, pot, natl, tid, { youth: true, years: ri(2, 4) });
+}
+
+function nativeNationality(tid) {
+  const t = teamById(tid);
+  if (!t) return "England";
+  const map = { EPL: "England", LIGA: "Spain", SA: "Italy", BL: "Germany", L1: "France" };
+  return map[t.league] || (NAME_POOLS[t.country] ? t.country : "England");
 }
 
 function generateSquadPlayer(tid, stature, pos) {
-  const natl = rand() < 0.55 ? "England" : randomNationality(rand);
+  const natl = rand() < 0.5 ? nativeNationality(tid) : randomNationality(rand);
   const age = ri(19, 33);
-  const ovr = ri(62, 71) + stature * 2 + ri(0, 3);
+  const ovr = clamp(ri(62, 71) + stature * 2 + ri(0, 3), 55, 79);
   const pot = age <= 23 ? clamp(ovr + ri(2, 10), ovr, 88) : ovr;
-  return makePlayer(randomName(natl, rand), pos, age, clamp(ovr, 55, 78), pot, natl, tid, { years: ri(1, 4) });
+  return makePlayer(uniqueName(natl), pos, age, ovr, pot, natl, tid, { years: ri(1, 4) });
 }
 
 const SQUAD_TEMPLATE = ["GK", "GK", "RB", "RB", "CB", "CB", "CB", "CB", "LB", "LB", "DM", "DM", "CM", "CM", "CM", "AM", "AM", "RW", "RW", "LW", "LW", "ST", "ST"];
 
-function fillSquad(team) {
-  // Top up a squad so every position has cover.
-  const squad = teamPlayers(team.tid);
+function fillSquad(team, seasoned) {
   const have = {};
-  for (const p of squad) have[p.pos] = (have[p.pos] || 0) + 1;
+  for (const p of teamPlayers(team.tid)) have[p.pos] = (have[p.pos] || 0) + 1;
   const need = {};
-  for (const pos of SQUAD_TEMPLATE) {
-    need[pos] = (need[pos] || 0) + 1;
-  }
+  for (const pos of SQUAD_TEMPLATE) need[pos] = (need[pos] || 0) + 1;
   for (const pos of Object.keys(need)) {
     while ((have[pos] || 0) < need[pos] - (pos === "GK" ? 0 : 1)) {
-      const yp = generateYouth(team.tid, team.stature);
-      yp.pos = pos;
-      state.players[yp.pid] = yp;
+      const p = (!seasoned && rand() < 0.5) ? generateYouth(team.tid, team.stature) : generateSquadPlayer(team.tid, team.stature, pos);
+      p.pos = pos;
+      state.players[p.pid] = p;
       have[pos] = (have[pos] || 0) + 1;
     }
   }
 }
 
-// ---------- League creation ----------
-function newLeague(userTid) {
-  rngState = Date.now() >>> 0;
-  state = {
-    version: 1,
-    season: START_SEASON,
-    round: 0,
-    phase: "season",
-    userTid: userTid,
-    nextPid: 1,
-    nextTid: 20,
-    teams: [],
-    players: {},
-    schedule: [],
-    news: [],
-    history: [],
-    offers: [],
-    pool: PROMOTION_POOL.map(c => ({ ...c })),
-    champions: [],
-  };
-  REAL_TEAMS.forEach((t, i) => {
-    state.teams.push({
-      tid: i, name: t.name, abbrev: t.abbrev, stadium: t.stadium,
-      colors: t.colors, stature: t.stature, budget: t.budget, history: [],
-    });
-    for (const row of t.players) {
-      const p = makePlayer(row[0], row[1], row[2], row[3], row[4], row[5], i);
-      state.players[p.pid] = p;
+// ---------- Real-player master list (for era starts) ----------
+function realPlayerDB() {
+  const db = [];
+  const seen = {};
+  for (const row of LEGENDS) {
+    const [name, pos, natl, birthYear, peak, stints, endYear] = row;
+    db.push({ name, pos, natl, birthYear, peak, stints, endYear });
+    seen[name] = true;
+  }
+  const collect = (teams) => {
+    for (const t of teams) {
+      for (const r of t.players) {
+        const [name, pos, age, ovr, pot, natl] = r;
+        if (seen[name]) continue;
+        seen[name] = true;
+        const birthYear = 2025 - age;
+        const peak = Math.max(ovr, pot);
+        const stints = STINT_OVERRIDES[name] || [[birthYear + (peak >= 88 ? 17 : peak >= 80 ? 18 : 19), t.abbrev]];
+        db.push({ name, pos, natl, birthYear, peak, stints, endYear: birthYear + (pos === "GK" ? 39 : 37) });
+      }
     }
-  });
-  for (const team of state.teams) fillSquad(team);
-  state.schedule = makeSchedule();
-  addNews(`Welcome to the ${seasonLabel()} season! You are managing ${teamById(userTid).name}. Good luck, boss.`);
+  };
+  for (const def of LEAGUE_DEFS) collect(def.teams());
+  collect(FOREIGN_CLUBS);
+  return db;
+}
+
+// ---------- World creation ----------
+function createTeam(info, league) {
+  const t = {
+    tid: newTid(), league, name: info.name, abbrev: info.abbrev, stadium: info.stadium,
+    colors: info.colors, stature: info.stature, budget: info.budget || (15 + info.stature * 10),
+    country: info.country || null, euro: !!info.euro, history: [],
+  };
+  state.teams.push(t);
+  return t;
+}
+
+function newLeague(startSeason, userLeagueId, userClubAbbrev) {
+  rngState = Date.now() >>> 0;
+  startSeason = clamp(startSeason || MAX_START, MIN_START, MAX_START);
+  state = {
+    version: 2, season: startSeason, week: 0, phase: "season",
+    userTid: -1, nextPid: 1, nextTid: 0,
+    teams: [], players: {}, leagues: {}, news: [], history: [], offers: [],
+    futureDebuts: [], futureMoves: [], cl: null,
+  };
+  // Teams
+  for (const def of LEAGUE_DEFS) {
+    state.leagues[def.id] = { id: def.id, name: def.name, country: def.country, schedule: [], weekPlan: [], pool: def.pool().map(c => ({ ...c })) };
+    for (const info of def.teams()) createTeam(info, def.id);
+  }
+  for (const info of FOREIGN_CLUBS) createTeam(info, "FOR");
+
+  // Players
+  if (startSeason === MAX_START) {
+    for (const def of LEAGUE_DEFS) seedAuthoredSquads(def.teams());
+    seedAuthoredSquads(FOREIGN_CLUBS);
+    // schedule future debuts for real 2025 squads? none — world is current.
+    for (const t of state.teams) fillSquad(t);
+  } else {
+    seedEraSquads(startSeason);
+    for (const t of state.teams) fillSquad(t, true);
+  }
+
+  // Schedules
+  for (const id of Object.keys(state.leagues)) buildLeagueSeason(id);
+  setupChampionsLeague(true);
+
+  // User club
+  const ut = state.teams.find(t => t.league === userLeagueId && t.abbrev === userClubAbbrev) || state.teams[0];
+  state.userTid = ut.tid;
+  addNews(`Welcome to the ${seasonLabel()} season! You are managing ${ut.name} in the ${leagueName(ut.league)}. Good luck, boss.`);
   return state;
 }
 
-function makeSchedule() {
-  // Circle-method double round robin for 20 teams.
-  const tids = shuffle(state.teams.map(t => t.tid));
+function seedAuthoredSquads(teamDefs) {
+  for (const info of teamDefs) {
+    const team = state.teams.find(t => t.abbrev === info.abbrev && t.name === info.name);
+    for (const r of info.players) {
+      const p = makePlayer(r[0], r[1], r[2], r[3], r[4], r[5], team.tid);
+      state.players[p.pid] = p;
+    }
+  }
+}
+
+function seedEraSquads(year) {
+  const db = realPlayerDB();
+  const byAbbrev = {};
+  for (const t of state.teams) byAbbrev[t.abbrev] = t;
+  for (const rp of db) {
+    const age = year - rp.birthYear;
+    const maxAge = rp.pos === "GK" ? 41 : 39;
+    // Find the stint active at `year`, restricted to in-world clubs.
+    let activeClub = null;
+    for (const [y, club] of rp.stints) {
+      if (y <= year && byAbbrev[club]) activeClub = club;
+      else if (y <= year && !byAbbrev[club]) activeClub = null; // moved out of world
+    }
+    const debutYear = rp.stints[0][0];
+    if (activeClub && year >= debutYear && year <= rp.endYear && age <= maxAge && age >= 15) {
+      const t = byAbbrev[activeClub];
+      const ovr = ovrAtAge(rp.peak, age, rp.pos, rp.name);
+      const pot = age < 27 ? Math.max(rp.peak, ovr) : ovr;
+      const p = makePlayer(rp.name, rp.pos, age, ovr, pot, rp.natl, t.tid);
+      state.players[p.pid] = p;
+      scheduleCareerMoves(p.pid, rp.stints, year, rp.endYear, activeClub);
+    } else if (year < rp.endYear) {
+      // Not in the world yet — schedule the debut at the first in-world stint after `year`.
+      const next = rp.stints.find(([y, club]) => y > year && byAbbrev[club]);
+      if (next) {
+        state.futureDebuts.push({ year: next[0], club: next[1], name: rp.name, pos: rp.pos, natl: rp.natl, birthYear: rp.birthYear, peak: rp.peak, stints: rp.stints, endYear: rp.endYear });
+      }
+    }
+  }
+  state.futureDebuts.sort((a, b) => a.year - b.year);
+}
+
+// ---------- Schedules ----------
+function leagueTeams(leagueId) { return state.teams.filter(t => t.league === leagueId); }
+
+function buildLeagueSeason(leagueId) {
+  const lg = state.leagues[leagueId];
+  const tids = shuffle(leagueTeams(leagueId).map(t => t.tid));
   const n = tids.length;
   const fixed = tids[0];
   let rest = tids.slice(1);
@@ -190,23 +312,154 @@ function makeSchedule() {
     firstHalf.push(round);
     rest = [rest[rest.length - 1]].concat(rest.slice(0, rest.length - 1));
   }
-  const secondHalf = firstHalf.map(round => round.map(m => match(m.away, m.home)));
-  return firstHalf.concat(secondHalf);
+  lg.schedule = firstHalf.concat(firstHalf.map(round => round.map(m => match(m.away, m.home))));
+  const L = lg.schedule.length; // 38 or 34
+  lg.weekPlan = [];
+  for (let w = 0; w < WEEKS; w++) {
+    const r = Math.floor(((w + 1) * L) / WEEKS), prev = Math.floor((w * L) / WEEKS);
+    lg.weekPlan.push(r > prev ? prev : -1);
+  }
 }
+
 function match(home, away) { return { home, away, played: false, hg: 0, ag: 0, events: [] }; }
+
+// ---------- Champions League ----------
+function setupChampionsLeague(firstSeason) {
+  const entrants = [];
+  for (const def of LEAGUE_DEFS) {
+    let top4;
+    if (firstSeason || !state.leagues[def.id].lastTable) {
+      top4 = leagueTeams(def.id).map(t => ({ t, r: teamRatings(t.tid).ovr })).sort((a, b) => b.r - a.r).slice(0, 4).map(x => x.t.tid);
+    } else {
+      top4 = state.leagues[def.id].lastTable.slice(0, 4).map(r => r.tid).filter(tid => teamById(tid));
+      while (top4.length < 4) {
+        const extra = leagueTeams(def.id).find(t => !top4.includes(t.tid));
+        if (!extra) break;
+        top4.push(extra.tid);
+      }
+    }
+    entrants.push(...top4);
+  }
+  const euro = state.teams.filter(t => t.league === "FOR" && t.euro)
+    .map(t => ({ t, r: teamRatings(t.tid).ovr })).sort((a, b) => b.r - a.r).slice(0, 12).map(x => x.t.tid);
+  entrants.push(...euro);
+
+  const seeded = entrants.map(tid => ({ tid, r: teamRatings(tid).ovr })).sort((a, b) => b.r - a.r).map(x => x.tid);
+  const pots = [seeded.slice(0, 8), shuffle(seeded.slice(8, 16)), shuffle(seeded.slice(16, 24)), shuffle(seeded.slice(24, 32))];
+  const groups = [];
+  for (let g = 0; g < 8; g++) groups.push([pots[0][g], pots[1][g], pots[2][g], pots[3][g]]);
+
+  const groupRounds = [];
+  const pairs = [[[0, 1], [2, 3]], [[2, 0], [3, 1]], [[0, 3], [1, 2]]];
+  for (let leg = 0; leg < 2; leg++) {
+    for (const md of pairs) {
+      const round = [];
+      for (let g = 0; g < 8; g++) {
+        for (const [i, j] of md) {
+          const a = groups[g][i], b = groups[g][j];
+          round.push(Object.assign(match(leg ? b : a, leg ? a : b), { group: g }));
+        }
+      }
+      groupRounds.push(round);
+    }
+  }
+  state.cl = { groups, groupRounds, stage: "groups", r16: [], qf: [], sf: [], final: [], winner: null };
+}
+
+function clGroupTable(g) {
+  const cl = state.cl;
+  const rows = cl.groups[g].map(tid => ({ tid, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }));
+  const by = {}; rows.forEach(r => by[r.tid] = r);
+  for (const round of cl.groupRounds) {
+    for (const m of round) {
+      if (m.group !== g || !m.played) continue;
+      const h = by[m.home], a = by[m.away];
+      h.p++; a.p++; h.gf += m.hg; h.ga += m.ag; a.gf += m.ag; a.ga += m.hg;
+      if (m.hg > m.ag) { h.w++; a.l++; h.pts += 3; }
+      else if (m.hg < m.ag) { a.w++; h.l++; a.pts += 3; }
+      else { h.d++; a.d++; h.pts++; a.pts++; }
+    }
+  }
+  rows.sort((x, y) => y.pts - x.pts || (y.gf - y.ga) - (x.gf - x.ga) || y.gf - x.gf);
+  return rows;
+}
+
+function simCLWeek(week) {
+  const cl = state.cl;
+  if (!cl) return [];
+  const out = [];
+  const gi = CL_GROUP_WEEKS.indexOf(week);
+  if (gi >= 0) {
+    for (const m of cl.groupRounds[gi]) { simMatch(m); out.push(Object.assign({ comp: "UCL" }, m)); }
+    if (gi === 5) {
+      // Groups done → R16 draw
+      const winners = [], runners = [];
+      for (let g = 0; g < 8; g++) {
+        const tbl = clGroupTable(g);
+        winners.push(tbl[0].tid); runners.push(tbl[1].tid);
+      }
+      for (let i = 0; i < 8; i++) cl.r16.push(Object.assign(match(winners[i], runners[(i + 1) % 8]), { ko: true }));
+      cl.stage = "r16";
+      addNews("🏆 Champions League knockout draw is set — Round of 16 in the new year!");
+    }
+    return out;
+  }
+  const koStage = Object.keys(CL_KO_WEEKS).find(k => CL_KO_WEEKS[k] === week);
+  if (!koStage || !cl.r16.length) return out;
+  const simKO = (matches) => {
+    const winners = [];
+    for (const m of matches) {
+      if (m.played) { winners.push(m.winner); continue; }
+      simMatch(m);
+      if (m.hg === m.ag) {
+        const hr = teamRatings(m.home).ovr, ar = teamRatings(m.away).ovr;
+        m.pens = true;
+        m.winner = rand() < 0.5 + (hr - ar) / 60 ? m.home : m.away;
+      } else m.winner = m.hg > m.ag ? m.home : m.away;
+      winners.push(m.winner);
+      out.push(Object.assign({ comp: "UCL" }, m));
+    }
+    return winners;
+  };
+  if (koStage === "r16") {
+    const w = simKO(cl.r16);
+    for (let i = 0; i < 4; i++) cl.qf.push(Object.assign(match(w[i * 2], w[i * 2 + 1]), { ko: true }));
+    cl.stage = "qf";
+  } else if (koStage === "qf" && cl.qf.length) {
+    const w = simKO(cl.qf);
+    cl.sf.push(Object.assign(match(w[0], w[1]), { ko: true }), Object.assign(match(w[2], w[3]), { ko: true }));
+    cl.stage = "sf";
+  } else if (koStage === "sf" && cl.sf.length) {
+    const w = simKO(cl.sf);
+    cl.final.push(Object.assign(match(w[0], w[1]), { ko: true, isFinal: true }));
+    cl.stage = "final";
+  } else if (koStage === "final" && cl.final.length) {
+    const w = simKO(cl.final);
+    cl.winner = w[0];
+    cl.stage = "done";
+    const t = teamById(cl.winner);
+    if (t) { t.budget = Math.round((t.budget + 15) * 10) / 10; addNews(`🏆⭐ ${t.name} are champions of Europe! They win the Champions League final ${cl.final[0].hg}-${cl.final[0].ag}${cl.final[0].pens ? " (pens)" : ""}.`); }
+  }
+  return out;
+}
+
+function clParticipants() { return state.cl ? state.cl.groups.flat() : []; }
 
 // ---------- Accessors ----------
 function teamById(tid) { return state.teams.find(t => t.tid === tid); }
 function teamPlayers(tid) { return Object.values(state.players).filter(p => p.tid === tid && !p.retired); }
 function freeAgents() { return Object.values(state.players).filter(p => p.tid === -1 && !p.retired); }
 function allActivePlayers() { return Object.values(state.players).filter(p => p.tid >= 0 && !p.retired); }
+function playablePlayers() {
+  return allActivePlayers().filter(p => { const t = teamById(p.tid); return t && t.league !== "FOR"; });
+}
 function seasonLabel(s) { const y = s === undefined ? state.season : s; return `${y}-${String((y + 1) % 100).padStart(2, "0")}`; }
+function leagueName(id) { const d = LEAGUE_DEFS.find(x => x.id === id); return d ? d.name : (id === "FOR" ? "Abroad" : id); }
 
 // ---------- Team strength ----------
 function bestXI(tid) {
   const avail = teamPlayers(tid).filter(p => p.injury === 0).sort((a, b) => b.ovr - a.ovr);
   const slots = FORMATION_433.map(s => ({ slot: s, player: null, eff: 0 }));
-  // Goalkeeper slot goes to the best actual GK; keepers never play outfield.
   const gks = avail.filter(p => p.pos === "GK");
   const outfield = avail.filter(p => p.pos !== "GK");
   if (gks.length) { slots[0].player = gks[0]; slots[0].eff = gks[0].ovr; }
@@ -249,7 +502,6 @@ function simMatch(m) {
   attachScorers(m, m.away, m.ag, ar.xi);
   m.events.sort((a, b) => a.min - b.min);
   m.played = true;
-  // Appearance / clean sheet stats + injuries
   creditAppearances(hr.xi, m.ag === 0);
   creditAppearances(ar.xi, m.hg === 0);
   return m;
@@ -280,7 +532,7 @@ function attachScorers(m, tid, goals, xi) {
     const min = ri(1, 94);
     let text = "";
     if (rand() < 0.72) {
-      let assister = weightedPick(xi, ASSIST_W);
+      const assister = weightedPick(xi, ASSIST_W);
       if (assister && assister.pid !== scorer.pid) {
         assister.stats.assists++;
         text = ` (assist: ${assister.name})`;
@@ -295,56 +547,59 @@ function creditAppearances(xi, cleanSheet) {
     if (!s.player) continue;
     s.player.stats.apps++;
     if (cleanSheet && s.slot === "GK") s.player.stats.cs++;
-    if (rand() < 0.030) {
-      s.player.injury = ri(1, 7);
-    }
+    if (rand() < 0.028) s.player.injury = ri(1, 7);
   }
 }
 
 // ---------- Simulation control ----------
-function simRound() {
-  if (state.phase !== "season" || state.round >= ROUNDS) return null;
-  const round = state.schedule[state.round];
-  for (const m of round) simMatch(m);
-  // user result news
-  const um = round.find(m => m.home === state.userTid || m.away === state.userTid);
-  if (um) {
-    const h = teamById(um.home), a = teamById(um.away);
-    addNews(`MD${state.round + 1}: ${h.name} ${um.hg}–${um.ag} ${a.name}`, state.userTid);
+function simWeek() {
+  if (state.phase !== "season" || state.week >= WEEKS) return null;
+  const results = [];
+  for (const id of Object.keys(state.leagues)) {
+    const lg = state.leagues[id];
+    const r = lg.weekPlan[state.week];
+    if (r >= 0) {
+      for (const m of lg.schedule[r]) {
+        simMatch(m);
+        if (m.home === state.userTid || m.away === state.userTid) results.push(Object.assign({ comp: id }, m));
+      }
+    }
   }
-  // heal injuries
+  for (const m of simCLWeek(state.week)) {
+    if (m.home === state.userTid || m.away === state.userTid) results.push(m);
+  }
   for (const p of Object.values(state.players)) { if (p.injury > 0) p.injury--; }
-  // expire offers
   state.offers = state.offers.filter(o => --o.ttl > 0);
-  state.round++;
-  if (state.round === 19) {
-    addNews("The January transfer window is open — clubs across the league are wheeling and dealing.");
+  state.week++;
+  if (state.week === 19) {
+    addNews("The January transfer window is open — clubs across Europe are wheeling and dealing.");
     aiTransfers(0.5);
     generateOffersForUser();
   }
-  if (state.round >= ROUNDS) {
+  if (state.week >= WEEKS) {
     state.phase = "offseason";
     concludeSeason();
   }
-  return round;
+  return results;
 }
 
-function simRounds(n) {
-  const out = [];
+function simWeeks(n) {
+  const all = [];
   for (let i = 0; i < n; i++) {
-    const r = simRound();
+    const r = simWeek();
     if (!r) break;
-    out.push(r);
+    all.push(r);
   }
-  return out;
+  return all;
 }
 
 // ---------- Standings ----------
-function standings() {
-  const rows = state.teams.map(t => ({ tid: t.tid, name: t.name, abbrev: t.abbrev, colors: t.colors, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0, form: [] }));
-  const byTid = {};
-  for (const r of rows) byTid[r.tid] = r;
-  for (const round of state.schedule) {
+function standings(leagueId) {
+  leagueId = leagueId || userLeague();
+  const lg = state.leagues[leagueId];
+  const rows = leagueTeams(leagueId).map(t => ({ tid: t.tid, name: t.name, abbrev: t.abbrev, colors: t.colors, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0, form: [] }));
+  const byTid = {}; for (const r of rows) byTid[r.tid] = r;
+  for (const round of lg.schedule) {
     for (const m of round) {
       if (!m.played) continue;
       const h = byTid[m.home], a = byTid[m.away];
@@ -361,19 +616,32 @@ function standings() {
   return rows;
 }
 
+function userLeague() { const t = teamById(state.userTid); return t ? t.league : "EPL"; }
+
 function teamMatches(tid) {
   const out = [];
-  state.schedule.forEach((round, ri_) => {
-    for (const m of round) {
-      if (m.home === tid || m.away === tid) out.push({ round: ri_, m });
+  const t = teamById(tid);
+  if (!t) return out;
+  const lg = state.leagues[t.league];
+  if (lg) {
+    lg.schedule.forEach((round, ridx) => {
+      for (const m of round) if (m.home === tid || m.away === tid) out.push({ round: ridx, m, comp: t.league });
+    });
+  }
+  if (state.cl && clParticipants().includes(tid)) {
+    state.cl.groupRounds.forEach((round, ridx) => {
+      for (const m of round) if (m.home === tid || m.away === tid) out.push({ round: ridx, m, comp: "UCL", week: CL_GROUP_WEEKS[ridx] });
+    });
+    for (const stage of ["r16", "qf", "sf", "final"]) {
+      for (const m of state.cl[stage]) if (m.home === tid || m.away === tid) out.push({ round: -1, m, comp: "UCL", stage });
     }
-  });
+  }
   return out;
 }
 
 // ---------- Stat leaders ----------
 function leaders(stat, count) {
-  return allActivePlayers()
+  return playablePlayers()
     .filter(p => p.stats.apps > 0)
     .sort((a, b) => b.stats[stat] - a.stats[stat] || a.stats.apps - b.stats.apps)
     .slice(0, count || 10);
@@ -381,33 +649,38 @@ function leaders(stat, count) {
 
 // ---------- Season conclusion ----------
 function concludeSeason() {
-  const table = standings();
-  const champ = table[0];
+  const champions = {};
+  for (const def of LEAGUE_DEFS) {
+    const table = standings(def.id);
+    state.leagues[def.id].lastTable = table;
+    champions[def.id] = { name: table[0].name, abbrev: table[0].abbrev, pts: table[0].pts, tid: table[0].tid };
+    addNews(`🏆 ${table[0].name} are ${seasonLabel()} ${def.name} champions with ${table[0].pts} points!`);
+  }
   const boot = leaders("goals", 1)[0];
   const play = leaders("assists", 1)[0];
   const glove = leaders("cs", 1)[0];
-  const potyPool = allActivePlayers().filter(p => p.stats.apps >= 10);
-  const potyScore = p => p.stats.goals * 1.0 + p.stats.assists * 0.75 + p.stats.cs * 0.9 + p.ovr * 0.12;
-  const poty = potyPool.sort((a, b) => potyScore(b) - potyScore(a))[0];
-  const ypoty = potyPool.filter(p => p.age <= 21).sort((a, b) => potyScore(b) - potyScore(a))[0];
-  const relegated = table.slice(-3);
+  const pool = playablePlayers().filter(p => p.stats.apps >= 10);
+  const score = p => p.stats.goals * 1.0 + p.stats.assists * 0.75 + p.stats.cs * 0.9 + p.ovr * 0.12;
+  const poty = pool.slice().sort((a, b) => score(b) - score(a))[0];
+  const ypoty = pool.filter(p => p.age <= 21).sort((a, b) => score(b) - score(a))[0];
+  const clW = state.cl && state.cl.winner ? teamById(state.cl.winner) : null;
 
   const entry = {
     season: state.season,
-    champion: { name: champ.name, abbrev: champ.abbrev, pts: champ.pts },
-    table: table.map(r => ({ pos: r.pos, name: r.name, abbrev: r.abbrev, pts: r.pts, w: r.w, d: r.d, l: r.l, gd: r.gd })),
+    champions,
+    clWinner: clW ? { name: clW.name, abbrev: clW.abbrev } : null,
+    tables: Object.fromEntries(LEAGUE_DEFS.map(d => [d.id, state.leagues[d.id].lastTable.map(r => ({ pos: r.pos, name: r.name, pts: r.pts, w: r.w, d: r.d, l: r.l, gd: r.gd }))])),
     goldenBoot: boot ? award(boot, boot.stats.goals, "goals") : null,
     playmaker: play ? award(play, play.stats.assists, "assists") : null,
     goldenGlove: glove ? award(glove, glove.stats.cs, "clean sheets") : null,
-    poty: poty ? award(poty, Math.round(potyScore(poty)), "rating") : null,
-    ypoty: ypoty ? award(ypoty, Math.round(potyScore(ypoty)), "rating") : null,
-    relegated: relegated.map(r => r.name),
-    userPos: table.find(r => r.tid === state.userTid).pos,
+    poty: poty ? award(poty, Math.round(score(poty)), "rating") : null,
+    ypoty: ypoty ? award(ypoty, Math.round(score(ypoty)), "rating") : null,
+    userPos: standings(userLeague()).find(r => r.tid === state.userTid)?.pos || 0,
     userTeam: teamById(state.userTid).name,
+    userLeague: userLeague(),
   };
   state.history.push(entry);
-  addNews(`🏆 ${champ.name} are ${seasonLabel()} Premier League champions with ${champ.pts} points!`);
-  if (boot) addNews(`👟 Golden Boot: ${boot.name} (${teamName(boot.tid)}) with ${boot.stats.goals} goals.`);
+  if (boot) addNews(`👟 Golden Shoe: ${boot.name} (${teamName(boot.tid)}) with ${boot.stats.goals} goals.`);
   if (poty) addNews(`⭐ Player of the Season: ${poty.name} (${teamName(poty.tid)}).`);
   if (ypoty) addNews(`🌟 Young Player of the Season: ${ypoty.name} (${teamName(ypoty.tid)}).`);
 }
@@ -421,8 +694,18 @@ function teamAbbrev(tid) { const t = teamById(tid); return t ? t.abbrev : "FA"; 
 // ---------- Offseason ----------
 function advanceToNextSeason() {
   if (state.phase !== "offseason") return false;
-  const table = standings();
 
+  // Synthesize league stats for foreign-club players who didn't play CL (career flavor)
+  for (const p of allActivePlayers()) {
+    const t = teamById(p.tid);
+    if (t && t.league === "FOR" && p.stats.apps === 0 && p.age >= 17) {
+      p.stats.apps = ri(16, 33);
+      const g = { FW: ri(3, 18), MF: ri(1, 8), DF: ri(0, 3), GK: 0 }[POS_GROUP[p.pos]];
+      p.stats.goals = Math.round(g * (p.ovr / 78));
+      p.stats.assists = ri(0, 7);
+      if (p.pos === "GK") p.stats.cs = ri(5, 14);
+    }
+  }
   // 1. Archive per-player season rows
   for (const p of Object.values(state.players)) {
     if (p.retired) continue;
@@ -430,18 +713,28 @@ function advanceToNextSeason() {
       p.career.push({ season: state.season, team: p.tid >= 0 ? teamAbbrev(p.tid) : "FA", ...p.stats, ovr: p.ovr, age: p.age });
     }
   }
-
   // 2. Team history + finances
-  for (const t of state.teams) {
-    const row = table.find(r => r.tid === t.tid);
-    t.history.push({ season: state.season, pos: row.pos, pts: row.pts, w: row.w, d: row.d, l: row.l });
-    const prize = 62 - (row.pos - 1) * 2.2;
-    const wageBillYr = teamPlayers(t.tid).reduce((s, p) => s + p.wage, 0) * 52 / 1000;
-    t.budget = clamp(Math.round((t.budget + prize + t.stature * 9 - wageBillYr * 0.45) * 10) / 10, 5, 300);
+  for (const def of LEAGUE_DEFS) {
+    const table = state.leagues[def.id].lastTable || standings(def.id);
+    for (const row of table) {
+      const t = teamById(row.tid);
+      if (!t) continue;
+      t.history.push({ season: state.season, pos: row.pos, pts: row.pts, league: def.id });
+      const prize = 62 - (row.pos - 1) * (44 / table.length);
+      const wageBillYr = teamPlayers(t.tid).reduce((s, p) => s + p.wage, 0) * 52 / 1000;
+      t.budget = clamp(Math.round((t.budget + prize + t.stature * 9 - wageBillYr * 0.45) * 10) / 10, 5, 320);
+    }
+  }
+  for (const t of state.teams.filter(x => x.league === "FOR")) {
+    t.budget = clamp(Math.round((t.budget + 12 + t.stature * 8) * 10) / 10, 5, 200);
+  }
+  // CL prize money
+  if (state.cl) {
+    for (const tid of clParticipants()) { const t = teamById(tid); if (t) t.budget = Math.round((t.budget + 9) * 10) / 10; }
   }
 
-  // 3. Promotion & relegation (user's club is never sent down)
-  handleRelegation(table);
+  // 3. Promotion & relegation per league
+  for (const def of LEAGUE_DEFS) handleRelegation(def.id);
 
   // 4. Development, aging, retirement
   developAllPlayers();
@@ -451,64 +744,122 @@ function advanceToNextSeason() {
 
   // 6. Youth intake
   for (const t of state.teams) {
+    if (t.league === "FOR") { fillSquad(t); continue; }
     const n = ri(2, 3);
     for (let i = 0; i < n; i++) {
       const yp = generateYouth(t.tid, t.stature);
       state.players[yp.pid] = yp;
-      if (t.tid === state.userTid) addNews(`🎓 Youth academy: ${yp.name} (${yp.pos}, ${yp.age}) has joined your first team squad. Potential: ${potLabel(yp)}.`, t.tid);
+      if (t.tid === state.userTid) addNews(`🎓 Youth academy: ${yp.name} (${yp.pos}, ${yp.age}) joins your first-team squad.`, t.tid);
     }
     fillSquad(t);
   }
 
-  // 7. AI transfer window
-  aiTransfers(1.0);
-  generateOffersForUser();
-
-  // 8. Prune free agent pool
-  pruneFreeAgents();
-
-  // 9. New season
+  // 7. New season baseline
   state.season++;
-  state.round = 0;
+  state.week = 0;
   state.phase = "season";
   for (const p of Object.values(state.players)) p.stats = blankStats();
-  state.schedule = makeSchedule();
-  addNews(`A new ${seasonLabel()} season kicks off! ${teamById(state.userTid).name} start the campaign with a £${teamById(state.userTid).budget}m transfer kitty.`);
+
+  // 8. Real-player debuts + real-history transfers arriving this season
+  spawnDebuts();
+  applyScheduledMoves();
+
+  // 9. AI transfer window + offers
+  aiTransfers(1.0);
+  generateOffersForUser();
+  pruneFreeAgents();
+
+  // 10. Schedules + CL
+  for (const id of Object.keys(state.leagues)) buildLeagueSeason(id);
+  setupChampionsLeague(false);
+
+  const ut = teamById(state.userTid);
+  addNews(`A new ${seasonLabel()} season kicks off! ${ut.name} start with a £${ut.budget}m transfer kitty.`);
   return true;
 }
 
-function potLabel(p) {
-  const d = p.pot - p.ovr;
-  if (p.pot >= 88) return "world class";
-  if (p.pot >= 82) return "elite";
-  if (d >= 20) return "high ceiling";
-  if (p.pot >= 75) return "solid starter";
-  return "squad player";
+function spawnDebuts() {
+  const remaining = [];
+  for (const d of state.futureDebuts) {
+    if (d.year > state.season) { remaining.push(d); continue; }
+    const t = state.teams.find(x => x.abbrev === d.club);
+    const overdue = state.season - d.year;
+    if (!t && overdue < 3) { remaining.push(d); continue; }
+    const age = state.season - d.birthYear;
+    if (age > 36) continue;
+    const ovr = ovrAtAge(d.peak, age, d.pos, d.name);
+    const pot = age < 27 ? Math.max(d.peak, ovr) : ovr;
+    const tid = t ? t.tid : -1;
+    const p = makePlayer(d.name, d.pos, age, ovr, pot, d.natl, tid, { years: ri(2, 5) });
+    state.players[p.pid] = p;
+    if (t && d.stints) scheduleCareerMoves(p.pid, d.stints, d.year, d.endYear || 2100, d.club);
+    if (d.peak >= 87) addNews(`🌟 Wonderkid alert: ${d.name} (${d.pos}, ${age}) has broken into the ${t ? t.name : "free agent"} first team. Scouts say he could be generational.`);
+    else if (d.peak >= 80) addNews(`📈 Debut: ${d.name} (${d.pos}, ${age}) makes the step up at ${t ? t.name : "a club abroad"}.`);
+  }
+  state.futureDebuts = remaining;
 }
 
-function handleRelegation(table) {
+// Record a placed real player's remaining timeline as scheduled transfers.
+function scheduleCareerMoves(pid, stints, fromYear, endYear, currentClub) {
+  let prev = currentClub;
+  for (const [y, club] of stints) {
+    if (y <= fromYear || y > endYear) continue;
+    state.futureMoves.push({ year: y, pid, club, prevClub: prev });
+    prev = club;
+  }
+}
+
+// Apply this season's real-history transfers — unless the timeline has already
+// diverged (the player was moved by you or the AI, or is now at your club).
+function applyScheduledMoves() {
+  const remaining = [];
+  const diverged = {};
+  for (const mv of state.futureMoves) {
+    if (mv.year > state.season) { remaining.push(mv); continue; }
+    const p = state.players[mv.pid];
+    if (!p || p.retired || diverged[mv.pid]) continue;
+    if (p.tid === state.userTid) { diverged[mv.pid] = true; continue; } // your squad, your rules
+    const from = p.tid >= 0 ? teamById(p.tid) : null;
+    if (!from || from.abbrev !== mv.prevClub) { diverged[mv.pid] = true; continue; }
+    const dest = state.teams.find(t => t.abbrev === mv.club);
+    if (!dest) continue;
+    if (dest.tid === state.userTid) {
+      // History says he joins YOUR club — he agitates for the move instead of forcing it.
+      p.agitateFor = state.userTid;
+      addNews(`📣 ${p.name} wants to join ${dest.name} — his agent says a fair bid would be accepted. (History says this is your signing to make.)`, state.userTid);
+      continue;
+    }
+    if (teamPlayers(dest.tid).length >= 32) continue;
+    const fee = Math.min(playerValue(p), Math.max(0, dest.budget));
+    transferPlayer(p, dest.tid, fee, from);
+  }
+  state.futureMoves = remaining;
+}
+
+function handleRelegation(leagueId) {
+  const lg = state.leagues[leagueId];
+  const table = lg.lastTable || standings(leagueId);
   let down = table.slice(-3);
   if (down.some(r => r.tid === state.userTid)) {
-    // The board pulls strings: user survives, next-worst side goes down instead.
     down = down.filter(r => r.tid !== state.userTid);
     const replacement = table[table.length - 4];
     down.push(replacement);
     addNews(`😅 Your board pulled every string imaginable — ${teamById(state.userTid).name} avoid the drop on a technicality. ${replacement.name} go down instead.`);
   }
-  const promoted = shuffle(state.pool).slice(0, 3);
-  state.pool = state.pool.filter(c => !promoted.includes(c));
+  const promoted = shuffle(lg.pool).slice(0, 3);
+  lg.pool = lg.pool.filter(c => !promoted.includes(c));
 
   for (const r of down) {
     const t = teamById(r.tid);
-    addNews(`⬇️ ${t.name} are relegated to the Championship.`);
-    // Stars get sold on to surviving clubs; the rest hit free agency.
+    if (!t) continue;
+    addNews(`⬇️ ${t.name} are relegated from the ${lg.name}.`);
     const squad = teamPlayers(t.tid).sort((a, b) => b.ovr - a.ovr);
     let sold = 0;
     for (const p of squad) {
       if (sold < 4 && (p.ovr >= 77 || (p.pot >= 84 && p.age <= 23))) {
-        const buyers = state.teams.filter(x => x.tid !== t.tid && !down.some(d => d.tid === x.tid) && x.budget >= playerValue(p));
+        const buyers = state.teams.filter(x => x.tid !== t.tid && x.league !== "FOR" && !down.some(dd => dd.tid === x.tid) && x.budget >= playerValue(p));
         if (buyers.length) {
-          const buyer = buyers.sort((a, b) => b.budget - a.budget)[ri(0, Math.min(3, buyers.length - 1))];
+          const buyer = buyers.sort((a, b) => b.budget - a.budget)[ri(0, Math.min(4, buyers.length - 1))];
           transferPlayer(p, buyer.tid, playerValue(p), t);
           sold++;
           continue;
@@ -516,27 +867,22 @@ function handleRelegation(table) {
       }
       p.tid = -1; p.listed = false;
     }
-    state.pool.push({ name: t.name, abbrev: t.abbrev, stadium: t.stadium, colors: t.colors, stature: Math.max(1, t.stature - 1) });
-    const idx = state.teams.indexOf(t);
-    state.teams.splice(idx, 1);
+    lg.pool.push({ name: t.name, abbrev: t.abbrev, stadium: t.stadium, colors: t.colors, stature: Math.max(1, t.stature - 1) });
+    state.teams.splice(state.teams.indexOf(t), 1);
   }
   for (const club of promoted) {
-    if (state.nextTid === undefined) state.nextTid = 20;
-    const tid = state.nextTid++;
-    const team = { tid, name: club.name, abbrev: club.abbrev, stadium: club.stadium, colors: club.colors, stature: club.stature, budget: 25 + club.stature * 10, history: [] };
-    state.teams.push(team);
+    const team = createTeam({ ...club, budget: 22 + club.stature * 10 }, leagueId);
     for (const pos of SQUAD_TEMPLATE) {
-      const p = generateSquadPlayer(tid, club.stature, pos);
+      const p = generateSquadPlayer(team.tid, club.stature, pos);
       state.players[p.pid] = p;
     }
-    addNews(`⬆️ ${club.name} are promoted to the Premier League!`);
+    addNews(`⬆️ ${club.name} are promoted to the ${lg.name}!`);
   }
 }
 
 function developAllPlayers() {
   for (const p of Object.values(state.players)) {
     if (p.retired) continue;
-    if (p.tid === -2) continue;
     const gkShift = p.pos === "GK" ? 2 : 0;
     const a = p.age;
     let d = 0;
@@ -547,21 +893,17 @@ function developAllPlayers() {
     else if (a <= 31 + gkShift) d = ri(-2, 0);
     else if (a <= 33 + gkShift) d = ri(-4, -1);
     else d = ri(-6, -2);
-    // playing time nudges growth
     if (d > 0 && p.stats.apps >= 20) d += rand() < 0.4 ? 1 : 0;
     if (d > 0) p.ovr = clamp(p.ovr + d, 40, p.pot);
     else p.ovr = clamp(p.ovr + d, 40, 99);
-    if (a <= 23) { p.pot = clamp(p.pot + ri(-2, 2), p.ovr, 96); }
+    if (a <= 23) p.pot = clamp(p.pot + ri(-2, 2), p.ovr, 96);
     else p.pot = Math.max(p.ovr, p.pot - 1);
     p.age++;
 
-    // Retirement
     const retireAge = p.pos === "GK" ? 36 : 34;
     if (p.age >= retireAge) {
       const prob = (p.age - retireAge + 1) * 0.3 + (p.ovr < 70 ? 0.3 : 0);
-      if (rand() < prob || p.age >= retireAge + 4) {
-        retirePlayer(p);
-      }
+      if (rand() < prob || p.age >= retireAge + 5) retirePlayer(p);
     } else if (p.tid === -1 && p.age >= 31 && p.ovr < 70 && rand() < 0.5) {
       retirePlayer(p);
     }
@@ -569,25 +911,27 @@ function developAllPlayers() {
 }
 
 function retirePlayer(p) {
-  const notable = p.ovr >= 78 || p.career.reduce((s, c) => s + c.goals, 0) >= 60;
-  if (notable) addNews(`👋 ${p.name} (${p.pos}, ${p.age}) has announced retirement after a distinguished career.`);
+  const careerGoals = p.career.reduce((s, c) => s + c.goals, 0);
+  if (p.ovr >= 78 || careerGoals >= 80 || p.pot >= 90) addNews(`👋 ${p.name} (${p.pos}, ${p.age}) has announced his retirement after a distinguished career (${careerGoals} career goals).`);
   p.retired = true;
   p.tid = -3;
   p.listed = false;
 }
 
 function handleContracts() {
+  // Players whose real-career timeline is still in play never drift into free agency.
+  const onScript = new Set((state.futureMoves || []).map(m => m.pid));
   for (const p of Object.values(state.players)) {
     if (p.retired || p.tid < 0) continue;
     p.years--;
     if (p.years <= 0) {
-      const t = teamById(p.tid);
       const isUser = p.tid === state.userTid;
-      // AI clubs re-sign most useful expiring players
-      if (!isUser && rand() < 0.65 && p.ovr >= 70) {
+      const resignProb = p.ovr >= 82 ? 0.92 : p.ovr >= 76 ? 0.75 : p.ovr >= 70 ? 0.6 : 0.35;
+      if (!isUser && (onScript.has(p.pid) || p.agitateFor !== undefined)) {
+        p.years = ri(1, 2); p.wage = wageFor(p.ovr);
+      } else if (!isUser && rand() < resignProb && p.ovr >= 68) {
         p.years = ri(2, 4); p.wage = wageFor(p.ovr);
       } else if (isUser && rand() < 0.35) {
-        // some user players agree to short extension on their own
         p.years = 1; p.wage = wageFor(p.ovr);
         addNews(`✍️ ${p.name} agreed a 1-year extension to stay at the club.`, p.tid);
       } else {
@@ -596,13 +940,12 @@ function handleContracts() {
       }
     }
   }
-  // Free agents get short "contracts" so wage is defined when signed
-  for (const p of freeAgents()) { p.wage = wageFor(p.ovr); }
+  for (const p of freeAgents()) p.wage = wageFor(p.ovr);
 }
 
 function pruneFreeAgents() {
   const fas = freeAgents().sort((a, b) => (b.ovr + b.pot) - (a.ovr + a.pot));
-  for (const p of fas.slice(90)) { p.retired = true; p.tid = -3; }
+  for (const p of fas.slice(110)) { p.retired = true; p.tid = -3; }
 }
 
 // ---------- Transfers ----------
@@ -612,6 +955,7 @@ function transferPlayer(p, toTid, fee, fromTeam) {
   if (toTeam) toTeam.budget = Math.round((toTeam.budget - fee) * 10) / 10;
   p.tid = toTid;
   p.listed = false;
+  delete p.agitateFor;
   p.years = ri(2, 4);
   p.wage = wageFor(p.ovr);
   addNews(`💸 ${p.name} joins ${toTeam ? toTeam.name : "?"}${fromTeam ? ` from ${fromTeam.name}` : " on a free transfer"}${fee > 0 ? ` for £${fee}m` : ""}.`);
@@ -619,14 +963,14 @@ function transferPlayer(p, toTid, fee, fromTeam) {
 
 function askingPrice(p) {
   const v = playerValue(p);
-  if (p.tid === -1) return Math.max(0.3, Math.round(v * 0.2 * 10) / 10); // signing fee
+  if (p.tid === -1) return Math.max(0.3, Math.round(v * 0.2 * 10) / 10);
+  if (p.agitateFor === state.userTid) return Math.round(v * 0.95 * 10) / 10;
   if (p.listed) return Math.round(v * 0.9 * 10) / 10;
-  const t = teamById(p.tid);
   const squad = teamPlayers(p.tid).sort((a, b) => b.ovr - a.ovr);
   const rank = squad.indexOf(p);
-  if (rank < 3 || p.ovr >= 86) return Math.round(v * 1.8 * 10) / 10;   // crown jewels
-  if (rank < 8) return Math.round(v * 1.35 * 10) / 10;                  // key players
-  return Math.round(v * 1.1 * 10) / 10;                                 // squad players
+  if (rank < 3 || p.ovr >= 86) return Math.round(v * 1.8 * 10) / 10;
+  if (rank < 8) return Math.round(v * 1.35 * 10) / 10;
+  return Math.round(v * 1.1 * 10) / 10;
 }
 
 function userBuy(pid) {
@@ -638,8 +982,9 @@ function userBuy(pid) {
   if (price > user.budget) return { ok: false, msg: `Not enough budget (need £${price}m, have £${user.budget}m).` };
   const seller = p.tid >= 0 ? teamById(p.tid) : null;
   if (seller && teamPlayers(seller.tid).length <= 15) return { ok: false, msg: `${seller.name} refuse — their squad is too thin.` };
-  transferPlayer(p, state.userTid, p.tid === -1 ? 0 : price, seller);
-  if (p.tid === state.userTid && !seller) user.budget = Math.round((user.budget - price) * 10) / 10; // FA signing fee
+  const wasFA = p.tid === -1;
+  transferPlayer(p, state.userTid, wasFA ? 0 : price, seller);
+  if (wasFA) user.budget = Math.round((user.budget - price) * 10) / 10;
   return { ok: true, msg: `${p.name} signs for ${user.name}!` };
 }
 
@@ -655,9 +1000,7 @@ function userSell(offerId) {
   return { ok: true, msg: `${p.name} sold to ${buyer.name} for £${o.fee}m.` };
 }
 
-function rejectOffer(offerId) {
-  state.offers = state.offers.filter(x => x.id !== offerId);
-}
+function rejectOffer(offerId) { state.offers = state.offers.filter(x => x.id !== offerId); }
 
 function toggleListed(pid) {
   const p = state.players[pid];
@@ -674,7 +1017,6 @@ function extendContract(pid) {
 }
 
 function generateOffersForUser(onlyPid) {
-  const user = teamById(state.userTid);
   const squad = teamPlayers(state.userTid);
   let nextId = state.offers.reduce((m, o) => Math.max(m, o.id), 0) + 1;
   for (const p of squad) {
@@ -695,14 +1037,13 @@ function generateOffersForUser(onlyPid) {
 function aiTransfers(intensity) {
   const teams = shuffle(state.teams.filter(t => t.tid !== state.userTid));
   for (const team of teams) {
-    let moves = Math.round((1 + rand() * 2) * intensity * (0.6 + team.budget / 120));
-    // List surplus players
+    const foreign = team.league === "FOR";
+    let moves = Math.round((1 + rand() * 2) * intensity * (foreign ? 0.4 : 0.6 + team.budget / 120));
     const squad = teamPlayers(team.tid).sort((a, b) => b.ovr - a.ovr);
     for (let i = 24; i < squad.length; i++) if (rand() < 0.5) squad[i].listed = true;
     while (moves-- > 0) {
       const squadNow = teamPlayers(team.tid);
       if (squadNow.length >= 30) break;
-      // weakest position group
       const groups = { GK: [], DF: [], MF: [], FW: [] };
       for (const p of squadNow) groups[POS_GROUP[p.pos]].push(p.ovr);
       let worst = "MF", worstAvg = 999;
@@ -711,10 +1052,11 @@ function aiTransfers(intensity) {
         const avg = top.length ? top.reduce((s, v) => s + v, 0) / top.length : 0;
         if (avg < worstAvg) { worstAvg = avg; worst = g; }
       }
-      // candidates: listed elsewhere or free agents in that group
       const cands = Object.values(state.players).filter(p =>
         !p.retired && p.tid !== team.tid && POS_GROUP[p.pos] === worst &&
+        p.agitateFor === undefined &&
         (p.tid === -1 || (p.listed && p.tid !== state.userTid)) &&
+        !(p.tid === -1 && p.ovr >= 80 && team.stature < 4) && // stars won't drop down for free
         p.ovr >= worstAvg - 6 && playerValue(p) * 1.05 <= team.budget
       ).sort((a, b) => (b.ovr + b.pot * 0.4) - (a.ovr + a.pot * 0.4)).slice(0, 6);
       if (!cands.length) break;
@@ -743,30 +1085,30 @@ function subRatings(p) {
     RW: { pace: 9, shooting: 4, passing: 1, dribbling: 9, defending: -16, physical: -5 },
     ST: { pace: 5, shooting: 10, passing: -4, dribbling: 2, defending: -18, physical: 4 },
   }[p.pos];
-  const keys = Object.keys(base);
   const out = {};
-  keys.forEach((k, i) => { out[k] = clamp(base[k] + posAdj[k] + noise(i), 20, 99); });
+  Object.keys(base).forEach((k, i) => { out[k] = clamp(base[k] + posAdj[k] + noise(i), 20, 99); });
   if (p.pos === "GK") { out.reflexes = clamp(o + noise(0), 20, 99); out.handling = clamp(o - 2 + noise(1), 20, 99); }
   return out;
 }
 
 // ---------- News ----------
 function addNews(text, tid) {
-  state.news.unshift({ season: state.season, round: state.round, text, tid: tid === undefined ? null : tid });
-  if (state.news.length > 250) state.news.length = 250;
+  state.news.unshift({ season: state.season, week: state.week, text, tid: tid === undefined ? null : tid });
+  if (state.news.length > 300) state.news.length = 300;
 }
 
 // ---------- Persistence ----------
 function save() {
-  if (typeof localStorage === "undefined") return;
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) { /* quota */ }
+  try { if (typeof localStorage !== "undefined") localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) { /* blocked/quota */ }
 }
 function load() {
   try {
     if (typeof localStorage === "undefined") return false;
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
-    state = JSON.parse(raw);
+    const s = JSON.parse(raw);
+    if (s.version !== 2) return false;
+    state = s;
     return true;
   } catch (e) { return false; }
 }
@@ -777,7 +1119,7 @@ function reset() {
 function exportJSON() { return JSON.stringify(state); }
 function importJSON(str) {
   const s = JSON.parse(str);
-  if (!s.teams || !s.players || !s.schedule) throw new Error("Not a Football GM save file");
+  if (!s.teams || !s.players || !s.leagues) throw new Error("Not a Football GM save file");
   state = s;
   save();
 }
@@ -785,14 +1127,15 @@ function importJSON(str) {
 // ---------- Public API ----------
 const FGM = {
   get state() { return state; },
+  WEEKS, MIN_START, MAX_START, LEAGUE_DEFS, CL_GROUP_WEEKS, CL_KO_WEEKS,
   newLeague, save, load, reset, exportJSON, importJSON,
-  simRound, simRounds, advanceToNextSeason,
-  standings, teamMatches, leaders, bestXI, teamRatings,
-  teamById, teamPlayers, freeAgents, allActivePlayers,
+  simWeek, simWeeks, advanceToNextSeason,
+  standings, teamMatches, leaders, bestXI, teamRatings, leagueTeams, userLeague, leagueName,
+  teamById, teamPlayers, freeAgents, allActivePlayers, playablePlayers,
   playerValue, askingPrice, wageFor, subRatings, seasonLabel,
   userBuy, userSell, rejectOffer, toggleListed, extendContract,
-  addNews, teamName, teamAbbrev,
-  POS_GROUP, ROUNDS,
+  addNews, teamName, teamAbbrev, clGroupTable, clParticipants,
+  POS_GROUP,
   setUserTid(tid) { state.userTid = tid; },
 };
 

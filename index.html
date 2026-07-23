@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Football GM — Soccer Management Sim</title>
 <link rel="stylesheet" href="css/style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
@@ -20,9 +20,8 @@
       <div class="play-menu">
         <button id="play-btn" class="btn btn-play">Play ▾</button>
         <div id="play-dropdown" class="play-dropdown hidden">
-          <button data-sim="one">Sim next match</button>
-          <button data-sim="week">Sim 1 matchday (all games)</button>
-          <button data-sim="month">Sim 4 matchdays</button>
+          <button data-sim="one">Sim next week</button>
+          <button data-sim="month">Sim 4 weeks</button>
           <button data-sim="season">Sim to end of season</button>
           <button data-sim="offseason" id="play-offseason">Continue to next season</button>
         </div>
@@ -36,6 +35,7 @@
       <a href="#roster" data-view="roster">👥 Roster</a>
       <a href="#standings" data-view="standings">🏆 League Table</a>
       <a href="#fixtures" data-view="fixtures">📅 Fixtures &amp; Results</a>
+      <a href="#europe" data-view="europe">⭐ Champions League</a>
       <a href="#stats" data-view="stats">📊 Stat Leaders</a>
       <a href="#players" data-view="players">🌍 All Players</a>
       <a href="#transfers" data-view="transfers">💸 Transfer Market</a>
@@ -55,8 +55,20 @@
   </div>
 </div>
 
+<nav id="bottom-nav">
+  <a href="#dashboard" data-view="dashboard">🏠<span>Home</span></a>
+  <a href="#roster" data-view="roster">👥<span>Squad</span></a>
+  <a href="#standings" data-view="standings">🏆<span>Table</span></a>
+  <a href="#transfers" data-view="transfers">💸<span>Market</span></a>
+  <a href="javascript:void(0)" data-view="menu">☰<span>More</span></a>
+</nav>
+
 <script src="js/names.js"></script>
 <script src="js/players.js"></script>
+<script src="js/leagues1.js"></script>
+<script src="js/leagues2.js"></script>
+<script src="js/world.js"></script>
+<script src="js/legends.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/app.js"></script>
 </body>

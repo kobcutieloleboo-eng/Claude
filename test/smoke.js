@@ -1,4 +1,4 @@
-// Headless smoke test: build a league and sim several full seasons in Node.
+// Headless smoke test v2: multi-league world, Champions League, era starts.
 // Usage: node test/smoke.js [seasons]
 const FGM = require("../js/engine.js");
 
@@ -8,76 +8,110 @@ function check(cond, msg) {
   if (!cond) { failures++; console.error("  ✗ FAIL:", msg); }
 }
 
-FGM.newLeague(0);
-const s = FGM.state;
-check(s.teams.length === 20, "20 teams at start");
-check(Object.keys(s.players).length >= 380, `player pool populated (${Object.keys(s.players).length})`);
-check(s.schedule.length === 38, "38 rounds scheduled");
-for (const round of s.schedule) {
-  check(round.length === 10, "10 matches per round");
-}
-// every team plays every round
-const seen = {};
-for (const m of s.schedule[0]) { seen[m.home] = 1; seen[m.away] = 1; }
-check(Object.keys(seen).length === 20, "all 20 teams play in round 1");
-// each team has a valid XI
+// ============ Modern start (2025) ============
+FGM.newLeague(2025, "EPL", "ARS");
+let s = FGM.state;
+check(FGM.leagueTeams("EPL").length === 20, "EPL has 20 teams");
+check(FGM.leagueTeams("LIGA").length === 20, "La Liga has 20 teams");
+check(FGM.leagueTeams("SA").length === 20, "Serie A has 20 teams");
+check(FGM.leagueTeams("BL").length === 18, "Bundesliga has 18 teams");
+check(FGM.leagueTeams("L1").length === 18, "Ligue 1 has 18 teams");
+check(FGM.leagueTeams("FOR").length >= 25, `foreign market clubs present (${FGM.leagueTeams("FOR").length})`);
+check(Object.keys(s.players).length > 1400, `player pool populated (${Object.keys(s.players).length})`);
+check(FGM.clParticipants().length === 32, "32 CL participants");
+check(FGM.teamById(s.userTid).abbrev === "ARS", "user club is Arsenal");
 for (const t of s.teams) {
   const xi = FGM.bestXI(t.tid);
-  check(xi.every(sl => sl.player), `${t.name} fields a full XI`);
-  check(xi[0].player.pos === "GK", `${t.name} has a GK in goal`);
+  check(xi.filter(sl => sl.player).length === 11, `${t.name} fields a full XI`);
+  check(!xi[0].player || xi[0].player.pos === "GK", `${t.name} has a GK in goal`);
+}
+// duplicate real-player check
+{
+  const names = {};
+  let dupes = 0;
+  for (const p of FGM.allActivePlayers()) { if (names[p.name]) dupes++; names[p.name] = 1; }
+  check(dupes < 8, `few duplicate names (${dupes})`); // real name collisions only (two Nico Gonzálezes etc.)
 }
 
 for (let i = 0; i < seasons; i++) {
   const season = s.season;
-  FGM.simRounds(38);
+  const results = FGM.simWeeks(38);
+  check(results.length === 38, "simmed 38 weeks");
   check(s.phase === "offseason", `season ${season}: reached offseason`);
-  const table = FGM.standings();
-  check(table.every(r => r.p === 38), `season ${season}: every team played 38`);
-  const totalPts = table.reduce((sum, r) => sum + r.pts, 0);
-  check(totalPts >= 380 * 2 && totalPts <= 380 * 3, `season ${season}: sane points total (${totalPts})`);
-  const champ = table[0];
-  const boot = FGM.leaders("goals", 1)[0];
-  const gf = table.reduce((sum, r) => sum + r.gf, 0);
-  console.log(`Season ${FGM.seasonLabel(season)}: 🏆 ${champ.name} (${champ.pts} pts) · ⚽ ${gf} goals (${(gf / 380).toFixed(2)}/match) · 👟 ${boot.name} ${boot.stats.goals}g in ${boot.stats.apps} apps`);
-  check(gf / 380 > 1.7 && gf / 380 < 4.0, `goals per match realistic (${(gf / 380).toFixed(2)})`);
-  check(boot.stats.goals >= 12 && boot.stats.goals <= 55, `golden boot total sane (${boot.stats.goals})`);
-  check(s.history.length === i + 1, "history recorded");
-
-  const ok = FGM.advanceToNextSeason();
-  check(ok, "advanced to next season");
-  check(s.teams.length === 20, `still 20 teams after promotion/relegation (${s.teams.length})`);
-  check(s.season === season + 1, "season incremented");
-  check(s.round === 0 && s.phase === "season", "new season ready");
-  const tids = new Set(s.teams.map(t => t.tid));
-  check(tids.size === 20, "team ids unique");
-  for (const t of s.teams) {
-    const n = FGM.teamPlayers(t.tid).length;
-    check(n >= 14 && n <= 40, `${t.name} squad size sane (${n})`);
-    const xi = FGM.bestXI(t.tid);
-    check(xi.filter(sl => sl.player).length >= 10, `${t.name} can field a team`);
+  const userWeeks = results.filter(r => r.length > 0).length;
+  check(userWeeks >= 36, `user gets matches most weeks (${userWeeks})`);
+  for (const def of FGM.LEAGUE_DEFS) {
+    const table = FGM.standings(def.id);
+    const n = table.length;
+    check(table.every(r => r.p === (n - 1) * 2), `${def.id}: full round robin played`);
   }
-  // user team never relegated
+  const gf = FGM.standings("EPL").reduce((sum, r) => sum + r.gf, 0);
+  check(gf / 380 > 2.0 && gf / 380 < 3.6, `EPL goals/match realistic (${(gf / 380).toFixed(2)})`);
+  check(s.cl && s.cl.winner !== null, "CL has a winner");
+  const clT = FGM.teamById(s.cl.winner);
+  const boot = FGM.leaders("goals", 1)[0];
+  console.log(`Season ${FGM.seasonLabel(season)}: EPL 🏆 ${FGM.standings("EPL")[0].name} · UCL 🏆⭐ ${clT ? clT.name : "?"} · 👟 ${boot.name} ${boot.stats.goals}g`);
+  check(FGM.advanceToNextSeason(), "advanced to next season");
+  check(FGM.leagueTeams("EPL").length === 20 && FGM.leagueTeams("BL").length === 18, "league sizes stable after pro/rel");
   check(s.teams.some(t => t.tid === s.userTid), "user team still in league");
+  check(FGM.clParticipants().length === 32, "next CL drawn");
 }
 
-// Transfers: user buys a listed/valued player
+// Transfers + persistence
 const user = FGM.teamById(s.userTid);
 user.budget = 500;
-const target = FGM.allActivePlayers().filter(p => p.tid !== s.userTid && p.tid >= 0)[0];
+const target = FGM.allActivePlayers().filter(p => p.tid !== s.userTid && p.tid >= 0 && FGM.teamById(p.tid).league === "FOR" && FGM.teamPlayers(p.tid).length > 16)[0];
 const res = FGM.userBuy(target.pid);
-check(res.ok, `user can buy a player (${res.msg})`);
-check(target.tid === s.userTid, "player moved to user team");
-
-// Persistence round-trip
+check(res.ok, `user can buy from a foreign club (${res.msg})`);
 const json = FGM.exportJSON();
 FGM.importJSON(json);
 check(FGM.state.season === s.season, "export/import round-trip");
+const foreignCareers = FGM.allActivePlayers().filter(p => { const t = FGM.teamById(p.tid); return t && t.league === "FOR" && p.career.length > 0 && p.career[p.career.length - 1].apps > 0; });
+check(foreignCareers.length > 50, `foreign players get career stats (${foreignCareers.length})`);
 
-// Career history sanity
-const withCareer = FGM.allActivePlayers().filter(p => p.career.length >= seasons - 1);
-check(withCareer.length > 100, `career histories recorded (${withCareer.length} players)`);
-const retired = Object.values(FGM.state.players).filter(p => p.retired);
-console.log(`After ${seasons} seasons: ${Object.keys(FGM.state.players).length} players in DB, ${retired.length} retired, ${FGM.freeAgents().length} free agents.`);
+// ============ Era start (2000) ============
+FGM.newLeague(2000, "EPL", "MUN");
+s = FGM.state;
+const findP = name => Object.values(s.players).find(p => p.name === name && !p.retired);
+const zidane = findP("Zinedine Zidane");
+check(zidane && FGM.teamAbbrev(zidane.tid) === "JUV", `2000: Zidane at Juventus (${zidane ? FGM.teamAbbrev(zidane.tid) : "missing"})`);
+const henry = findP("Thierry Henry");
+check(henry && FGM.teamAbbrev(henry.tid) === "ARS", "2000: Henry at Arsenal");
+const shearer = findP("Alan Shearer");
+check(shearer && FGM.teamAbbrev(shearer.tid) === "NEW", "2000: Shearer at Newcastle");
+check(!findP("Lionel Messi"), "2000: Messi not yet in world");
+check(!findP("Cristiano Ronaldo"), "2000: CR7 not yet in world");
+check(s.futureDebuts.some(d => d.name === "Lionel Messi" && d.year === 2004 && d.club === "BAR"), "Messi debut scheduled 2004 @ BAR");
+check(s.futureDebuts.some(d => d.name === "Cristiano Ronaldo"), "CR7 debut scheduled");
+check(s.futureDebuts.length > 300, `future debuts scheduled (${s.futureDebuts.length})`);
+for (const t of s.teams) {
+  check(FGM.bestXI(t.tid).filter(sl => sl.player).length === 11, `2000: ${t.name} fields a full XI`);
+}
+
+// Sim 2000 → 2005 and watch the kids arrive
+for (let i = 0; i < 5; i++) { FGM.simWeeks(38); FGM.advanceToNextSeason(); }
+check(s.season === 2005, `reached 2005 (${s.season})`);
+const messi = findP("Lionel Messi");
+check(messi, "2005: Messi has debuted");
+if (messi) {
+  check(messi.age === 2005 - 1987, `Messi age correct (${messi.age})`);
+  check(messi.pot >= 95, `Messi potential world-class (${messi.pot})`);
+  console.log(`2005: Messi is ${messi.age}, ovr ${messi.ovr}, pot ${messi.pot}, at ${FGM.teamAbbrev(messi.tid)}`);
+}
+const cr7 = findP("Cristiano Ronaldo");
+check(cr7, "2005: CR7 has debuted");
+if (cr7) {
+  // User manages MUN, so history's CR7→United move becomes an "agitating to join you" prompt.
+  const ok = FGM.teamAbbrev(cr7.tid) === "MUN" || cr7.agitateFor === s.userTid;
+  check(ok, `2005: CR7 at MUN or agitating to join user's MUN (${FGM.teamAbbrev(cr7.tid)}, agitate=${cr7.agitateFor})`);
+  console.log(`2005: CR7 is ${cr7.age}, ovr ${cr7.ovr}, pot ${cr7.pot}, at ${FGM.teamAbbrev(cr7.tid)}${cr7.agitateFor !== undefined ? " (pushing to join you)" : ""}`);
+}
+const zz = Object.values(s.players).find(p => p.name === "Zinedine Zidane");
+check(zz, "Zidane still in DB (playing or retired)");
+if (!zz.retired) check(FGM.teamAbbrev(zz.tid) === "RMA", `2005: Zidane followed history to Real Madrid (${FGM.teamAbbrev(zz.tid)})`);
+console.log(`2005: Zidane ${zz.retired ? "retired" : `ovr ${zz.ovr} at ${FGM.teamAbbrev(zz.tid)}`}, career rows: ${zz.career.length}`);
+check(s.history.length === 5, "5 seasons of history");
+check(s.history.every(h => h.champions.EPL && h.clWinner !== undefined), "history has champions + CL");
 
 if (failures) { console.error(`\n${failures} check(s) failed`); process.exit(1); }
 console.log("\nAll smoke checks passed ✔");
