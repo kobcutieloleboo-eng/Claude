@@ -703,51 +703,103 @@ document.addEventListener("click", e => {
 });
 
 // ---------- New game flow ----------
-let ngSeason = 2025, ngLeague = "EPL";
+let ngSeason = 2025, ngLeague = "EPL", ngPick = null;
+
+function clubPreview(t, season) {
+  const modern = season === 2025;
+  const xi = modern ? Math.round(t.players.slice().sort((a, b) => b[3] - a[3]).slice(0, 11).reduce((s2, p) => s2 + p[3], 0) / 11) : null;
+  const stars = modern ? t.players.slice().sort((a, b) => b[3] - a[3]).slice(0, 3).map(p => p[0]) : [];
+  return { xi, stars };
+}
+
 function showNewGameFlow() {
   $("#top-status").textContent = "New career";
   $("#top-team").textContent = "";
   const seasonOpts = [];
   for (let y = FGM.MAX_START; y >= FGM.MIN_START; y--) {
-    seasonOpts.push(`<option value="${y}" ${y === ngSeason ? "selected" : ""}>${y}-${String((y + 1) % 100).padStart(2, "0")}${y === 2025 ? " (current)" : ""}</option>`);
+    seasonOpts.push(`<option value="${y}" ${y === ngSeason ? "selected" : ""}>${y}-${String((y + 1) % 100).padStart(2, "0")}${y === 2025 ? " · current squads" : ""}</option>`);
   }
+  const eraChips = [[2025, "Today"], [2015, "2015"], [2010, "2010"], [2005, "2005"], [2000, "2000"]]
+    .map(([y, label]) => `<a class="ltab ${y === ngSeason ? "active" : ""}" data-ng-era="${y}" href="javascript:void(0)">${label}</a>`).join("");
   const leagueTabsHtml = FGM.LEAGUE_DEFS.map(d =>
     `<a class="ltab ${d.id === ngLeague ? "active" : ""}" data-ng-league="${d.id}" href="javascript:void(0)">${esc(d.name)}</a>`).join("");
   const def = FGM.LEAGUE_DEFS.find(d => d.id === ngLeague);
   const clubs = def.teams().slice().sort((a, b) => b.stature - a.stature || a.name.localeCompare(b.name));
-  const rows = clubs.map(t => {
-    const modern = ngSeason === 2025;
-    const best = modern ? t.players.slice().sort((a, b) => b[3] - a[3]).slice(0, 3).map(p => p[0]).join(", ") : "Era squad built from real career timelines";
-    return `<tr>
-      <td><span class="team-dot" style="background:${t.colors[0]}"></span><strong>${esc(t.name)}</strong></td>
-      <td>${"★".repeat(t.stature)}</td>
-      <td class="mute">${esc(best)}</td>
-      <td><button class="btn btn-small btn-accent" data-ng-pick="${esc(t.abbrev)}">Manage</button></td></tr>`;
+  const cards = clubs.map(t => {
+    const pv = clubPreview(t, ngSeason);
+    return `<div class="club-card" data-ng-pick="${esc(t.abbrev)}" role="button" tabindex="0">
+      <div class="club-stripe" style="background:linear-gradient(90deg, ${t.colors[0]}, ${t.colors[1]})"></div>
+      <div class="club-card-body">
+        <div class="club-name">${esc(t.name)}</div>
+        <div class="club-meta">
+          <span class="club-stars">${"★".repeat(t.stature)}<span class="mute">${"★".repeat(5 - t.stature)}</span></span>
+          ${pv.xi !== null ? `<span>XI ${ovrSpan(pv.xi)}</span>` : ""}
+          <span class="mute">${money(t.budget)}</span>
+        </div>
+        ${pv.stars.length ? `<div class="club-stars-line mute">${esc(pv.stars.join(" · "))}</div>` : `<div class="club-stars-line mute">Squad rebuilt from real ${ngSeason} careers</div>`}
+      </div>
+      <div class="club-go">›</div>
+    </div>`;
   }).join("");
   content.innerHTML = `
-    <h1>⚽ Welcome to Football GM</h1>
-    <p class="sub">Real clubs, real players, real career arcs — across Europe's top five leagues, with the Champions League on top. Start in any season back to 2000: begin in the past and watch Messi, Ronaldo &amp; co. debut right on schedule.</p>
-    <div class="card" style="margin-bottom:14px"><h3>1 · Choose your starting season</h3>
-      <div class="controls"><select id="ng-season">${seasonOpts.join("")}</select>
-      <span class="mute" id="ng-season-hint">${ngSeason === 2025 ? "Authored 2025-26 squads." : "Rosters rebuilt from real career timelines; future stars debut on schedule."}</span></div></div>
-    <div class="card" style="margin-bottom:14px"><h3>2 · Choose your league</h3><div class="ltabs" style="margin:0">${leagueTabsHtml}</div></div>
-    <h3 style="margin:6px 0">3 · Choose your club</h3>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>Club</th><th>Stature</th><th>Notable players (2025-26)</th><th></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`;
+    <div class="ng-wrap">
+      <h1>⚽ Football GM</h1>
+      <p class="sub">Real clubs, real players, real career arcs — Europe's top five leagues plus the Champions League.</p>
+      <div class="card ng-step"><h3><span class="step-n">1</span> When does your story start?</h3>
+        <div class="ltabs" style="margin:4px 0 8px">${eraChips}</div>
+        <div class="controls" style="margin:0"><select id="ng-season">${seasonOpts.join("")}</select></div>
+        <p class="mute" style="margin-top:8px">${ngSeason === 2025 ? "Hand-rated 2025-26 squads, fresh from the summer window." : `Squads rebuilt as they were in ${ngSeason} — and future stars (Messi, Ronaldo, Mbappé…) will debut right on schedule as the years pass.`}</p></div>
+      <div class="card ng-step"><h3><span class="step-n">2</span> Pick your league</h3>
+        <div class="ltabs" style="margin:4px 0 0">${leagueTabsHtml}</div></div>
+      <div class="card ng-step"><h3><span class="step-n">3</span> Tap the club you want to manage</h3>
+        <div class="club-grid">${cards}</div></div>
+    </div>`;
   $("#ng-season").addEventListener("change", e => { ngSeason = parseInt(e.target.value, 10); showNewGameFlow(); });
+  content.querySelectorAll("[data-ng-era]").forEach(a => a.addEventListener("click", () => { ngSeason = parseInt(a.dataset.ngEra, 10); showNewGameFlow(); }));
   content.querySelectorAll("[data-ng-league]").forEach(a => a.addEventListener("click", () => { ngLeague = a.dataset.ngLeague; showNewGameFlow(); }));
-  content.querySelectorAll("[data-ng-pick]").forEach(b => b.addEventListener("click", () => {
-    content.innerHTML = "<h1>⚽ Building your world…</h1><p class='sub'>Assembling squads" + (ngSeason < 2025 ? `, rewinding to ${ngSeason} and scheduling ${2025 - ngSeason} years of real debuts` : "") + "…</p>";
+  content.querySelectorAll("[data-ng-pick]").forEach(c => {
+    const open = () => showConfirmClub(c.dataset.ngPick);
+    c.addEventListener("click", open);
+    c.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+  });
+}
+
+function showConfirmClub(abbrev) {
+  const def = FGM.LEAGUE_DEFS.find(d => d.id === ngLeague);
+  const t = def.teams().find(x => x.abbrev === abbrev);
+  if (!t) return;
+  ngPick = abbrev;
+  const pv = clubPreview(t, ngSeason);
+  const starRows = ngSeason === 2025
+    ? t.players.slice().sort((a, b) => b[3] - a[3]).slice(0, 6).map(p =>
+        `<tr><td>${esc(p[0])}</td><td>${posBadge(p[1])}</td><td class="num">${p[2]}</td><td class="num">${ovrSpan(p[3])}</td><td class="num mute">${p[4]}</td></tr>`).join("")
+    : "";
+  openModal(`
+    <div class="confirm-head" style="background:linear-gradient(120deg, ${t.colors[0]}22, ${t.colors[1]}22); border-left: 5px solid ${t.colors[0]}">
+      <h1 style="margin:0">${esc(t.name)}</h1>
+      <p class="sub" style="margin:4px 0 0">${esc(def.name)} · ${esc(t.stadium)} · ${"★".repeat(t.stature)}${"☆".repeat(5 - t.stature)}
+      ${pv.xi !== null ? ` · XI ${ovrSpan(pv.xi)}` : ""} · Budget <span class="money">${money(t.budget)}</span></p>
+    </div>
+    ${starRows ? `<h2>Key players</h2><div class="tbl-wrap"><table><thead><tr><th>Player</th><th>Pos</th><th class="num">Age</th><th class="num">Ovr</th><th class="num">Pot</th></tr></thead><tbody>${starRows}</tbody></table></div>`
+      : `<p class="mute" style="margin:14px 0">Your ${ngSeason} squad will be rebuilt from real career timelines the moment you take the job — legends included.</p>`}
+    <div class="confirm-actions">
+      <button class="btn btn-start" id="ng-confirm">🤝 Take the job — start ${ngSeason}-${String((ngSeason + 1) % 100).padStart(2, "0")}</button>
+      <button class="btn" id="ng-cancel">← Choose another club</button>
+    </div>
+    <p class="mute" style="text-align:center;margin-top:8px">Starting a career replaces any existing save.</p>`);
+  $("#ng-cancel").addEventListener("click", closeModal);
+  $("#ng-confirm").addEventListener("click", () => {
+    closeModal();
+    content.innerHTML = `<div class="ng-wrap"><h1>⚽ Building your world…</h1><p class="sub">Assembling ${esc(t.name)}'s squad${ngSeason < 2025 ? `, rewinding to ${ngSeason} and scheduling ${2025 - ngSeason} years of real debuts` : ""}…</p></div>`;
     setTimeout(() => {
-      FGM.newLeague(ngSeason, ngLeague, b.dataset.ngPick);
+      FGM.newLeague(ngSeason, ngLeague, ngPick);
       FGM.save();
       location.hash = "#dashboard";
       currentView = "dashboard";
       render();
-      toast(`You're the new manager of ${FGM.teamById(FGM.state.userTid).name}. The board expects results.`, "toast-W", 4500);
+      toast(`🤝 You're the new manager of ${FGM.teamById(FGM.state.userTid).name}. The board expects results.`, "toast-W", 4500);
     }, 30);
-  }));
+  });
 }
 
 // ---------- Boot ----------
