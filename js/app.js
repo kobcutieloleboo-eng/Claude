@@ -802,6 +802,70 @@ function showConfirmClub(abbrev) {
   });
 }
 
+// ---------- Always-visible custom scrollbar for the main content area ----------
+function setupScrollbar() {
+  const track = document.createElement("div");
+  track.id = "sb-track";
+  const thumb = document.createElement("div");
+  thumb.id = "sb-thumb";
+  track.appendChild(thumb);
+  document.body.appendChild(track);
+
+  let maxTop = 0, thumbH = 0;
+  const upd = () => {
+    const c = content;
+    const ratio = c.clientHeight / c.scrollHeight;
+    if (!c.scrollHeight || ratio >= 0.999) { track.classList.add("sb-hidden"); return; }
+    track.classList.remove("sb-hidden");
+    const th = track.clientHeight;
+    thumbH = Math.max(40, ratio * th);
+    maxTop = th - thumbH;
+    const denom = c.scrollHeight - c.clientHeight;
+    const top = denom > 0 ? (c.scrollTop / denom) * maxTop : 0;
+    thumb.style.height = thumbH + "px";
+    thumb.style.transform = `translateY(${top}px)`;
+  };
+  content.addEventListener("scroll", upd, { passive: true });
+  window.addEventListener("resize", upd);
+  new MutationObserver(() => requestAnimationFrame(upd)).observe(content, { childList: true, subtree: true });
+
+  // Drag the thumb / tap the track to jump
+  let drag = null;
+  const onMove = e => {
+    if (!drag) return;
+    const denom = maxTop || 1;
+    const target = drag.scroll + ((e.clientY - drag.y) / denom) * (content.scrollHeight - content.clientHeight);
+    content.scrollTop = Math.max(0, target);
+    e.preventDefault();
+  };
+  const endDrag = () => {
+    drag = null;
+    track.classList.remove("sb-active");
+    content.style.scrollBehavior = "";
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", endDrag);
+    window.removeEventListener("pointercancel", endDrag);
+  };
+  thumb.addEventListener("pointerdown", e => {
+    drag = { y: e.clientY, scroll: content.scrollTop };
+    track.classList.add("sb-active");
+    content.style.scrollBehavior = "auto"; // instant tracking while dragging
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  track.addEventListener("pointerdown", e => {
+    if (e.target === thumb) return;
+    const rect = track.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (e.clientY - rect.top - thumbH / 2) / ((rect.height - thumbH) || 1)));
+    content.scrollTo({ top: frac * (content.scrollHeight - content.clientHeight), behavior: "smooth" });
+  });
+  upd();
+}
+setupScrollbar();
+
 // ---------- Boot ----------
 if (FGM.load()) navigate();
 else showNewGameFlow();
