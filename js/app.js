@@ -59,7 +59,7 @@ function resultToasts(weekResults) {
     const opp = FGM.teamById(isHome ? m.away : m.home);
     const gf = isHome ? m.hg : m.ag, ga = isHome ? m.ag : m.hg;
     const res = gf > ga ? "W" : gf < ga ? "L" : "D";
-    const comp = m.comp === "UCL" ? " · UCL" : "";
+    const comp = m.comp && m.comp !== FGM.userLeague() ? ` · ${esc(FGM.compName(m.comp))}` : "";
     const pen = m.pens ? (m.winner === s.userTid ? " (won on pens)" : " (lost on pens)") : "";
     return { res, html: `<strong>${res}</strong> ${gf}–${ga} ${isHome ? "vs" : "@"} ${esc(opp ? opp.name : "?")}${comp}${pen}` };
   };
@@ -162,7 +162,7 @@ function render(args) {
   });
   const views = {
     dashboard: viewDashboard, roster: viewRoster, standings: viewStandings,
-    fixtures: viewFixtures, europe: viewEurope, stats: viewStats, players: viewAllPlayers,
+    fixtures: viewFixtures, europe: viewEurope, cups: viewCups, stats: viewStats, players: viewAllPlayers,
     transfers: viewTransfers, finances: viewFinances, history: viewHistory,
     news: viewNews, settings: viewSettings,
   };
@@ -194,7 +194,7 @@ function viewDashboard() {
   let nextHtml = "<p class='mute'>Season complete.</p>";
   if (next) {
     const h = FGM.teamById(next.m.home), a = FGM.teamById(next.m.away);
-    if (h && a) nextHtml = `<p>${next.comp === "UCL" ? "🏆 Champions League" : esc(FGM.leagueName(next.comp))}</p>
+    if (h && a) nextHtml = `<p>${next.comp === "UCL" ? "🏆 " : ""}${esc(FGM.compName(next.comp))}</p>
       <p class="big">${teamLink(h)} vs ${teamLink(a)}</p><p class="mute">${esc(h.stadium)}</p>`;
   }
   let lastHtml = "<p class='mute'>No matches played yet.</p>";
@@ -202,7 +202,7 @@ function viewDashboard() {
     const h = FGM.teamById(last.m.home), a = FGM.teamById(last.m.away);
     if (h && a) lastHtml = `<p class="big match-open" data-mref="${matchRef(last)}" style="cursor:pointer">
       ${esc(h.name)} ${last.m.hg}–${last.m.ag} ${esc(a.name)}</p>
-      <p class="mute">${last.comp === "UCL" ? "Champions League" : "League"} — click for details</p>`;
+      <p class="mute">${esc(FGM.compName(last.comp))} — click for details</p>`;
   }
 
   const mini = table.slice(0, 6).map(r =>
@@ -407,6 +407,46 @@ function viewEurope() {
     <div class="cards">${groupHtml}</div>`;
 }
 
+function viewCups(args) {
+  const s = FGM.state;
+  const cups = FGM.userCups();
+  if (!cups.length) { content.innerHTML = "<h1>Domestic Cups</h1><p class='mute'>No cups in your league yet — they start with the season.</p>"; return; }
+  matchRegistry.length = 0;
+  let sel = (args && args[0]) || cups[0].id;
+  if (!cups.some(c => c.id === sel)) sel = cups[0].id;
+  const cup = cups.find(c => c.id === sel);
+  const tabs = cups.map(c => `<a class="ltab ${c.id === sel ? "active" : ""}" href="#cups/${c.id}">${esc(c.name)}</a>`).join("");
+
+  const winner = cup.winner !== null ? FGM.teamById(cup.winner) : null;
+  // Rounds already played (most recent first), with a note for teams still alive.
+  const roundBlocks = cup.rounds.slice().reverse().map(r => {
+    const rows = r.matches.map(m => {
+      const h = FGM.teamById(m.home), a = FGM.teamById(m.away);
+      if (!h || !a) return "";
+      const score = m.played ? `${m.hg}–${m.ag}${m.pens ? " p" : ""}` : "vs";
+      return `<div class="match-row match-open" data-mref="${matchRef({ m })}">
+        <span class="team-name right ${m.winner === m.home ? "win" : ""}">${teamDot(h)}${esc(h.name)}</span>
+        <span class="score">${score}</span>
+        <span class="team-name ${m.winner === m.away ? "win" : ""}">${teamDot(a)}${esc(a.name)}</span>
+      </div>`;
+    }).join("");
+    return `<h2>${esc(r.name)} <span class="mute" style="font-weight:400;font-size:13px">· week ${r.week + 1}</span></h2>${rows || "<p class='mute'>Byes only.</p>"}`;
+  }).join("");
+
+  // Teams still in the hat
+  const alive = cup.survivors.filter(tid => tid !== null).map(tid => FGM.teamById(tid)).filter(Boolean);
+  const aliveHtml = (!winner && alive.length > 1)
+    ? `<div class="card"><h3>Still in the cup (${alive.length})</h3><div class="worldxi-chips">${alive.sort((a, b) => a.name.localeCompare(b.name)).map(t => `<span class="xi-chip">${teamDot(t)}${esc(t.name)}</span>`).join("")}</div></div>`
+    : "";
+
+  content.innerHTML = `
+    <h1>Domestic Cups</h1>
+    <div class="ltabs">${tabs}</div>
+    <p class="sub">${esc(cup.name)} · ${FGM.seasonLabel()} · single-leg knockout, replays settled on penalties · top seeds get a first-round bye</p>
+    ${winner ? `<div class="card" style="border-color:var(--gold)"><h3>🏆 Winner</h3><p class="big">${teamLink(winner)}</p></div>` : aliveHtml}
+    ${roundBlocks || "<p class='mute'>First round hasn't been played yet — sim into week " + (cup.weeks[0] + 1) + ".</p>"}`;
+}
+
 function viewStats() {
   const cats = [
     ["goals", "Top Scorers (all comps)", "Goals"],
@@ -502,26 +542,48 @@ function viewFinances() {
 
 function viewHistory() {
   const s = FGM.state;
-  if (!s.history.length) {
-    content.innerHTML = "<h1>History</h1><p class='mute'>No completed seasons yet. Champions, awards and Champions League winners will appear here.</p>";
-    return;
-  }
   const blocks = s.history.slice().reverse().map(h => {
     const aw = (label, a) => a ? `<tr><td>${label}</td><td>${esc(a.name)} (${esc(a.abbrev)})</td><td class="num">${a.value} ${a.label === "rating" ? "" : a.label}</td></tr>` : "";
     const champs = FGM.LEAGUE_DEFS.map(d => h.champions[d.id]
       ? `<tr><td>${esc(d.name)}</td><td>🏆 ${esc(h.champions[d.id].name)}</td><td class="num">${h.champions[d.id].pts}</td></tr>` : "").join("");
+    const podium = (h.bdor && h.bdor.length)
+      ? `<div class="bdor-podium">${h.bdor.map((b, i) => `<div class="bdor-slot bdor-${i + 1}"><span class="bdor-medal">${["🥇", "🥈", "🥉"][i]}</span><strong>${esc(b.name)}</strong><span class="mute">${esc(b.abbrev)}</span></div>`).join("")}</div>`
+      : "";
+    const xi = (h.worldXI && h.worldXI.length)
+      ? `<div class="worldxi"><strong>🌍 FIFPRO World XI</strong><div class="worldxi-chips">${h.worldXI.map(w => `<span class="xi-chip">${posBadge(w.pos)} ${esc(w.name)} <span class="mute">${esc(w.abbrev)}</span></span>`).join("")}</div></div>`
+      : "";
+    const cupsHtml = (h.cups && h.cups.length)
+      ? `<div class="worldxi"><strong>🏆 Domestic cup winners</strong><div class="worldxi-chips">${h.cups.map(c => `<span class="xi-chip">${esc(c.name)}: <strong>${esc(c.winner)}</strong></span>`).join("")}</div></div>`
+      : "";
     return `<div class="card">
       <h3>${FGM.seasonLabel(h.season)}${h.clWinner ? ` — 🏆⭐ ${esc(h.clWinner.name)} won the Champions League` : ""}</h3>
+      ${podium}
       <div class="flex">
         <div><strong>League champions</strong><div class="tbl-wrap"><table><tbody>${champs}</tbody></table></div>
         <p class="mute" style="margin-top:6px">Your finish: ${h.userPos}${ord(h.userPos)} in the ${esc(FGM.leagueName(h.userLeague))} (${esc(h.userTeam)})</p></div>
-        <div><strong>Awards</strong><div class="tbl-wrap"><table><tbody>
-          ${aw("👟 Golden Shoe", h.goldenBoot)}${aw("🎯 Playmaker", h.playmaker)}${aw("🧤 Golden Glove", h.goldenGlove)}
-          ${aw("⭐ Player of the Season", h.poty)}${aw("🌟 Young Player", h.ypoty)}
+        <div><strong>Individual awards</strong><div class="tbl-wrap"><table><tbody>
+          ${aw("👟 European Golden Boot", h.goldenBoot)}${aw("🎯 Playmaker", h.playmaker)}${aw("🧤 Yashin Trophy", h.goldenGlove)}
+          ${aw("🌟 Golden Boy", h.ypoty)}
         </tbody></table></div></div>
-      </div></div>`;
+      </div>
+      ${xi}${cupsHtml}</div>`;
   }).join("");
-  content.innerHTML = `<h1>History</h1><div class="cards" style="flex-direction:column">${blocks}</div>`;
+  const pre = FGM.preHistory();
+  const preRows = pre.map(r => `
+    <tr><td><strong>${FGM.seasonLabel(r.year)}</strong></td>
+    <td>${r.bdor ? esc(r.bdor) : "<span class='mute'>—</span>"}</td>
+    <td>${r.boot ? esc(r.boot) : "—"}</td>
+    <td>${r.cl ? "⭐ " + esc(r.cl) : "—"}</td>
+    <td>${esc(r.champs.EPL || "—")}</td><td>${esc(r.champs.LIGA || "—")}</td><td>${esc(r.champs.SA || "—")}</td><td>${esc(r.champs.BL || "—")}</td><td>${esc(r.champs.L1 || "—")}</td></tr>`).join("");
+  const preBlock = pre.length ? `
+    <h2>📜 The record books — before your save</h2>
+    <p class="sub">Real winners from every season up to your ${FGM.seasonLabel(FGM.state.startSeason || FGM.state.season)} start.</p>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Season</th><th>🏅 Ballon d'Or</th><th>👟 Golden Boot</th><th>Champions League</th><th>England</th><th>Spain</th><th>Italy</th><th>Germany</th><th>France</th></tr></thead>
+      <tbody>${preRows}</tbody></table></div>` : "";
+  content.innerHTML = `<h1>History</h1>
+    ${s.history.length ? `<div class="cards" style="flex-direction:column">${blocks}</div>` : "<p class='mute'>No completed seasons in your save yet — your first Ballon d'Or night comes at the end of this season.</p>"}
+    ${preBlock}`;
 }
 
 function viewNews() {
@@ -617,12 +679,24 @@ function showPlayerModal(pid) {
     · Ovr ${ovrSpan(p.ovr)} / Pot <span class="mute">${p.pot}</span>
     · Value <span class="money">${money(FGM.playerValue(p))}</span> · £${p.wage}k/wk, ${p.years} yr${p.years === 1 ? "" : "s"}</p>
     <div class="controls">${actions}</div>
+    ${honoursHtml(p)}
     <h2>Attributes</h2>
     <div class="attr-grid">${attrs}</div>
     <h2>Career</h2>
     <div class="tbl-wrap"><table><thead><tr><th>Season</th><th>Team</th><th class="num">Age</th><th class="num">Ovr</th><th class="num">Apps</th><th class="num">G</th><th class="num">A</th><th class="num">CS</th></tr></thead>
     <tbody>${curRow}${careerRows || ""}</tbody></table></div>
     ${p.retired ? "" : "<p class='mute' style='margin-top:6px'>* current season in progress</p>"}`);
+}
+
+function honoursHtml(p) {
+  const hon = FGM.honoursFor(p.name);
+  if (!hon.length) return "";
+  const icon = a => a.startsWith("Ballon") ? "🏅" : a.includes("Boot") ? "👟" : a.includes("World XI") ? "🌍" : a.includes("Yashin") ? "🧤" : a.includes("Golden Boy") ? "🌟" : "🎯";
+  const counts = {};
+  for (const h of hon) counts[h.award] = (counts[h.award] || 0) + 1;
+  const summary = Object.entries(counts).map(([a, n]) => `<span class="badge badge-gold">${icon(a)} ${n > 1 ? n + "× " : ""}${esc(a)}</span>`).join(" ");
+  const rows = hon.slice().reverse().map(h => `<div class="honour-line"><span class="mute">${FGM.seasonLabel(h.season)}</span> ${icon(h.award)} ${esc(h.award)}${h.real ? " <span class='mute'>(real)</span>" : ""}</div>`).join("");
+  return `<h2>Honours</h2><div class="honours-wrap">${summary}<details class="honours-detail"><summary>Full list (${hon.length})</summary>${rows}</details></div>`;
 }
 
 // ---------- Team modal ----------
@@ -662,7 +736,7 @@ function showMatchModal(m) {
   }).join("");
   openModal(`
     <h1 style="text-align:center">${esc(h.name)} <span style="background:var(--bg3);padding:2px 14px;border-radius:6px">${m.hg}–${m.ag}</span> ${esc(a.name)}</h1>
-    <p class="sub" style="text-align:center">${esc(h.stadium)}${m.pens ? ` · ${esc(FGM.teamName(m.winner))} win on penalties` : ""}${m.comp === "UCL" || m.ko ? " · Champions League" : ""}</p>
+    <p class="sub" style="text-align:center">${esc(h.stadium)}${m.pens ? ` · ${esc(FGM.teamName(m.winner))} win on penalties` : ""}${m.comp && m.comp !== FGM.userLeague() ? ` · ${esc(FGM.compName(m.comp))}` : (m.ko ? " · Champions League" : "")}</p>
     <h2>Goals</h2>
     ${events || "<p class='mute'>A goalless affair. The purists loved it.</p>"}`);
 }

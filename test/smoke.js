@@ -48,6 +48,11 @@ for (let i = 0; i < seasons; i++) {
   const gf = FGM.standings("EPL").reduce((sum, r) => sum + r.gf, 0);
   check(gf / 380 > 2.0 && gf / 380 < 3.6, `EPL goals/match realistic (${(gf / 380).toFixed(2)})`);
   check(s.cl && s.cl.winner !== null, "CL has a winner");
+  // Domestic cups: all 6 resolve to a winner every season
+  const cupHist = s.history[s.history.length - 1].cups;
+  check(cupHist && cupHist.length === 6, `all 6 domestic cups completed (${cupHist ? cupHist.length : 0})`);
+  check(cupHist.every(c => c.winner && c.winner !== "—"), "every cup has a real winner");
+  check(cupHist.some(c => c.id === "FAC") && cupHist.some(c => c.id === "COPPA"), "FA Cup and Coppa Italia both present");
   const clT = FGM.teamById(s.cl.winner);
   const boot = FGM.leaders("goals", 1)[0];
   console.log(`Season ${FGM.seasonLabel(season)}: EPL 🏆 ${FGM.standings("EPL")[0].name} · UCL 🏆⭐ ${clT ? clT.name : "?"} · 👟 ${boot.name} ${boot.stats.goals}g`);

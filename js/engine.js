@@ -4,14 +4,14 @@
 
 /* global START_SEASON, REAL_TEAMS, PROMOTION_POOL, NAME_POOLS, randomNationality, randomName,
    LALIGA_TEAMS, LALIGA_POOL, SERIEA_TEAMS, SERIEA_POOL, BUNDES_TEAMS, BUNDES_POOL,
-   LIGUE1_TEAMS, LIGUE1_POOL, FOREIGN_CLUBS, LEGENDS, STINT_OVERRIDES */
+   LIGUE1_TEAMS, LIGUE1_POOL, FOREIGN_CLUBS, LEGENDS, STINT_OVERRIDES, PRE_AWARDS */
 
 (function (root) {
 "use strict";
 
 if (typeof module !== "undefined" && typeof require !== "undefined") {
   Object.assign(root, require("./names.js"), require("./players.js"), require("./leagues1.js"),
-    require("./leagues2.js"), require("./world.js"), require("./legends.js"));
+    require("./leagues2.js"), require("./world.js"), require("./legends.js"), require("./awards.js"));
 }
 
 const WEEKS = 38;
@@ -27,6 +27,18 @@ const LEAGUE_DEFS = [
 ];
 const CL_GROUP_WEEKS = [2, 5, 8, 11, 14, 17];
 const CL_KO_WEEKS = { r16: 21, qf: 26, sf: 31, final: 35 };
+
+// Domestic cups — knockout tournaments among each league's clubs. Round weeks are
+// the 5 midweek slots each cup uses (R1 → last 32/16 → QF → SF → Final).
+const CUP_DEFS = [
+  { id: "FAC", name: "FA Cup", league: "EPL", weeks: [3, 9, 16, 25, 34] },
+  { id: "EFL", name: "EFL Cup", league: "EPL", weeks: [4, 10, 18, 28, 36] },
+  { id: "COPA", name: "Copa del Rey", league: "LIGA", weeks: [3, 9, 16, 25, 34] },
+  { id: "COPPA", name: "Coppa Italia", league: "SA", weeks: [3, 9, 16, 25, 34] },
+  { id: "DFB", name: "DFB-Pokal", league: "BL", weeks: [3, 9, 16, 25, 34] },
+  { id: "CDF", name: "Coupe de France", league: "L1", weeks: [3, 9, 16, 25, 34] },
+];
+const CUP_ROUND_NAMES = ["Round 1", "Round of 16", "Quarter-finals", "Semi-finals", "Final"];
 
 // ---------- RNG & utils ----------
 let rngState = Date.now() >>> 0;
@@ -216,7 +228,7 @@ function newLeague(startSeason, userLeagueId, userClubAbbrev) {
   rngState = Date.now() >>> 0;
   startSeason = clamp(startSeason || MAX_START, MIN_START, MAX_START);
   state = {
-    version: 2, season: startSeason, week: 0, phase: "season",
+    version: 2, season: startSeason, startSeason, week: 0, phase: "season",
     userTid: -1, nextPid: 1, nextTid: 0,
     teams: [], players: {}, leagues: {}, news: [], history: [], offers: [],
     futureDebuts: [], futureMoves: [], cl: null,
@@ -242,6 +254,7 @@ function newLeague(startSeason, userLeagueId, userClubAbbrev) {
   // Schedules
   for (const id of Object.keys(state.leagues)) buildLeagueSeason(id);
   setupChampionsLeague(true);
+  setupCups();
 
   // User club
   const ut = state.teams.find(t => t.league === userLeagueId && t.abbrev === userClubAbbrev) || state.teams[0];
@@ -445,6 +458,85 @@ function simCLWeek(week) {
 
 function clParticipants() { return state.cl ? state.cl.groups.flat() : []; }
 
+// ---------- Domestic cups ----------
+// Standard single-elimination bracket seed order for a power-of-two size.
+function bracketSeedOrder(size) {
+  let seeds = [1, 2];
+  while (seeds.length < size) {
+    const sum = seeds.length * 2 + 1;
+    const next = [];
+    for (const s of seeds) { next.push(s); next.push(sum - s); }
+    seeds = next;
+  }
+  return seeds;
+}
+
+function setupCups() {
+  state.cups = {};
+  for (const def of CUP_DEFS) {
+    if (!state.leagues[def.league]) continue;
+    // Seed by team strength; pad to 32 with byes (null) so top seeds get a bye.
+    const seeded = leagueTeams(def.league)
+      .map(t => ({ tid: t.tid, r: teamRatings(t.tid).ovr }))
+      .sort((a, b) => b.r - a.r)
+      .map(x => x.tid);
+    const order = bracketSeedOrder(32);
+    const survivors = order.map(seed => (seed <= seeded.length ? seeded[seed - 1] : null));
+    state.cups[def.id] = {
+      id: def.id, name: def.name, league: def.league, weeks: def.weeks.slice(),
+      stage: 0, survivors, rounds: [], winner: null,
+    };
+  }
+}
+
+function simCupWeek(week) {
+  const out = [];
+  if (!state.cups) return out;
+  for (const cup of Object.values(state.cups)) {
+    if (cup.winner !== null || cup.stage >= cup.weeks.length) continue;
+    if (cup.weeks[cup.stage] !== week) continue;
+    const surv = cup.survivors;
+    const winners = [];
+    const roundMatches = [];
+    for (let i = 0; i < surv.length; i += 2) {
+      const a = surv[i], b = surv[i + 1];
+      if (a === null && b === null) { winners.push(null); continue; }
+      if (a === null) { winners.push(b); continue; }
+      if (b === null) { winners.push(a); continue; }
+      const m = match(a, b);
+      m.cup = cup.id;
+      simMatch(m);
+      if (m.hg === m.ag) {
+        const hr = teamRatings(m.home).ovr, ar = teamRatings(m.away).ovr;
+        m.pens = true;
+        m.winner = rand() < 0.5 + (hr - ar) / 60 ? m.home : m.away;
+      } else m.winner = m.hg > m.ag ? m.home : m.away;
+      winners.push(m.winner);
+      roundMatches.push(m);
+      if (m.home === state.userTid || m.away === state.userTid) out.push(Object.assign({ comp: cup.id }, m));
+    }
+    cup.rounds.push({ name: CUP_ROUND_NAMES[cup.stage] || `Round ${cup.stage + 1}`, week, matches: roundMatches });
+    cup.survivors = winners;
+    cup.stage++;
+    if (cup.survivors.length === 1) {
+      cup.winner = cup.survivors[0];
+      const t = teamById(cup.winner);
+      if (t) {
+        t.budget = Math.round((t.budget + 6) * 10) / 10;
+        addNews(`🏆 ${t.name} win the ${cup.name}!`);
+      }
+    }
+  }
+  return out;
+}
+
+function cupParticipant(cupId, tid) {
+  const cup = state.cups && state.cups[cupId];
+  if (!cup) return false;
+  if (cup.survivors.includes(tid)) return true;
+  return cup.rounds.some(r => r.matches.some(m => m.home === tid || m.away === tid));
+}
+
 // ---------- Accessors ----------
 function teamById(tid) { return state.teams.find(t => t.tid === tid); }
 function teamPlayers(tid) { return Object.values(state.players).filter(p => p.tid === tid && !p.retired); }
@@ -455,6 +547,12 @@ function playablePlayers() {
 }
 function seasonLabel(s) { const y = s === undefined ? state.season : s; return `${y}-${String((y + 1) % 100).padStart(2, "0")}`; }
 function leagueName(id) { const d = LEAGUE_DEFS.find(x => x.id === id); return d ? d.name : (id === "FOR" ? "Abroad" : id); }
+function compName(id) {
+  if (id === "UCL") return "Champions League";
+  const c = CUP_DEFS.find(x => x.id === id);
+  if (c) return c.name;
+  return leagueName(id);
+}
 
 // ---------- Team strength ----------
 function bestXI(tid) {
@@ -568,6 +666,7 @@ function simWeek() {
   for (const m of simCLWeek(state.week)) {
     if (m.home === state.userTid || m.away === state.userTid) results.push(m);
   }
+  for (const m of simCupWeek(state.week)) results.push(m);
   for (const p of Object.values(state.players)) { if (p.injury > 0) p.injury--; }
   state.offers = state.offers.filter(o => --o.ttl > 0);
   state.week++;
@@ -636,6 +735,14 @@ function teamMatches(tid) {
       for (const m of state.cl[stage]) if (m.home === tid || m.away === tid) out.push({ round: -1, m, comp: "UCL", stage });
     }
   }
+  if (state.cups) {
+    for (const cup of Object.values(state.cups)) {
+      if (cup.league !== t.league) continue;
+      for (const r of cup.rounds) {
+        for (const m of r.matches) if (m.home === tid || m.away === tid) out.push({ round: -1, m, comp: cup.id, stage: r.name });
+      }
+    }
+  }
   return out;
 }
 
@@ -665,6 +772,31 @@ function concludeSeason() {
   const ypoty = pool.filter(p => p.age <= 21).sort((a, b) => score(b) - score(a))[0];
   const clW = state.cl && state.cl.winner ? teamById(state.cl.winner) : null;
 
+  // Ballon d'Or: season score plus silverware bonuses
+  const champTids = new Set(Object.values(champions).map(c => c.tid));
+  const bdorScore = p => {
+    let sc = score(p) + p.ovr * 0.10;
+    if (champTids.has(p.tid) && p.stats.apps >= 15) sc += 6;
+    if (clW && p.tid === clW.tid && p.stats.apps >= 15) sc += 10;
+    return sc;
+  };
+  const bdorPodium = pool.slice().sort((a, b) => bdorScore(b) - bdorScore(a)).slice(0, 3)
+    .map(p => ({ name: p.name, team: teamName(p.tid), abbrev: teamAbbrev(p.tid), pos: p.pos, pid: p.pid, value: Math.round(bdorScore(p)) }));
+
+  // FIFPRO World XI: 1 GK, 4 DF (RB/CB/CB/LB), 3 MF, 3 FW by season score
+  const worldXI = [];
+  const used = new Set();
+  const pickBest = (filter, n) => {
+    const c = pool.filter(p => !used.has(p.pid) && filter(p)).sort((a, b) => score(b) - score(a)).slice(0, n);
+    for (const p of c) { used.add(p.pid); worldXI.push({ name: p.name, pos: p.pos, abbrev: teamAbbrev(p.tid), pid: p.pid }); }
+  };
+  pickBest(p => p.pos === "GK", 1);
+  pickBest(p => p.pos === "RB", 1);
+  pickBest(p => p.pos === "CB", 2);
+  pickBest(p => p.pos === "LB", 1);
+  pickBest(p => ["DM", "CM", "AM"].includes(p.pos), 3);
+  pickBest(p => ["LW", "RW", "ST"].includes(p.pos), 3);
+
   const entry = {
     season: state.season,
     champions,
@@ -675,14 +807,26 @@ function concludeSeason() {
     goldenGlove: glove ? award(glove, glove.stats.cs, "clean sheets") : null,
     poty: poty ? award(poty, Math.round(score(poty)), "rating") : null,
     ypoty: ypoty ? award(ypoty, Math.round(score(ypoty)), "rating") : null,
+    bdor: bdorPodium,
+    worldXI,
+    cups: state.cups ? Object.values(state.cups).filter(c => c.winner !== null).map(c => {
+      const t = teamById(c.winner);
+      return { id: c.id, name: c.name, league: c.league, winner: t ? t.name : "—", abbrev: t ? t.abbrev : "—" };
+    }) : [],
     userPos: standings(userLeague()).find(r => r.tid === state.userTid)?.pos || 0,
     userTeam: teamById(state.userTid).name,
     userLeague: userLeague(),
   };
   state.history.push(entry);
-  if (boot) addNews(`👟 Golden Shoe: ${boot.name} (${teamName(boot.tid)}) with ${boot.stats.goals} goals.`);
-  if (poty) addNews(`⭐ Player of the Season: ${poty.name} (${teamName(poty.tid)}).`);
-  if (ypoty) addNews(`🌟 Young Player of the Season: ${ypoty.name} (${teamName(ypoty.tid)}).`);
+  if (bdorPodium.length) addNews(`🏅 Ballon d'Or: ${bdorPodium[0].name} (${bdorPodium[0].team})! Podium: ${bdorPodium.map((b, i) => `${i + 1}. ${b.name}`).join(", ")}.`);
+  if (boot) addNews(`👟 European Golden Boot: ${boot.name} (${teamName(boot.tid)}) with ${boot.stats.goals} goals.`);
+  if (worldXI.length) addNews(`🌍 FIFPRO World XI announced: ${worldXI.map(w => w.name).join(", ")}.`);
+  if (glove) addNews(`🧤 Yashin Trophy: ${glove.name} (${teamName(glove.tid)}) with ${glove.stats.cs} clean sheets.`);
+  if (ypoty) addNews(`🌟 Golden Boy: ${ypoty.name} (${teamName(ypoty.tid)}).`);
+  if (entry.cups.length) {
+    const userCup = entry.cups.find(c => c.abbrev === teamAbbrev(state.userTid));
+    if (userCup) addNews(`🎉 Congratulations boss — ${teamName(state.userTid)} lifted the ${userCup.name}!`, state.userTid);
+  }
 }
 
 function award(p, value, label) {
@@ -769,9 +913,10 @@ function advanceToNextSeason() {
   generateOffersForUser();
   pruneFreeAgents();
 
-  // 10. Schedules + CL
+  // 10. Schedules + CL + domestic cups
   for (const id of Object.keys(state.leagues)) buildLeagueSeason(id);
   setupChampionsLeague(false);
+  setupCups();
 
   const ut = teamById(state.userTid);
   addNews(`A new ${seasonLabel()} season kicks off! ${ut.name} start with a £${ut.budget}m transfer kitty.`);
@@ -1091,6 +1236,57 @@ function subRatings(p) {
   return out;
 }
 
+// ---------- Real record books & player honours ----------
+function clubNameByAbbrev(ab) {
+  const t = state ? state.teams.find(x => x.abbrev === ab) : null;
+  if (t) return t.name;
+  for (const def of LEAGUE_DEFS) {
+    const hit = def.teams().find(c => c.abbrev === ab) || def.pool().find(c => c.abbrev === ab);
+    if (hit) return hit.name;
+  }
+  const f = FOREIGN_CLUBS.find(c => c.abbrev === ab);
+  return f ? f.name : ab;
+}
+
+// Seasons before the user's start season, from the real record books.
+// Each entry's `year` is the season's start year (2007 = the 2007-08 season).
+function preHistory() {
+  const start = state.startSeason || state.season;
+  const out = [];
+  for (let finalYear = 2000; finalYear <= start; finalYear++) {
+    out.push({
+      year: finalYear - 1,
+      bdor: PRE_AWARDS.bdor[finalYear] || null,
+      boot: PRE_AWARDS.boot[finalYear] || null,
+      cl: PRE_AWARDS.cl[finalYear] ? clubNameByAbbrev(PRE_AWARDS.cl[finalYear]) : null,
+      champs: Object.fromEntries(LEAGUE_DEFS.map(d => [d.id, PRE_AWARDS.champs[d.id][finalYear] ? clubNameByAbbrev(PRE_AWARDS.champs[d.id][finalYear]) : null])),
+    });
+  }
+  return out.reverse();
+}
+
+// All honours for a player, real (pre-start) + earned in your save.
+function honoursFor(name) {
+  const start = state.startSeason || state.season;
+  const out = [];
+  for (const [y, w] of Object.entries(PRE_AWARDS.bdor)) {
+    if (+y <= start && w === name) out.push({ season: +y - 1, award: "Ballon d'Or", real: true });
+  }
+  for (const [y, w] of Object.entries(PRE_AWARDS.boot)) {
+    if (+y <= start && w.split(" & ").includes(name)) out.push({ season: +y - 1, award: "European Golden Boot", real: true });
+  }
+  for (const h of state.history) {
+    if (h.bdor && h.bdor[0] && h.bdor[0].name === name) out.push({ season: h.season, award: "Ballon d'Or" });
+    if (h.goldenBoot && h.goldenBoot.name === name) out.push({ season: h.season, award: "European Golden Boot" });
+    if (h.worldXI && h.worldXI.some(w => w.name === name)) out.push({ season: h.season, award: "FIFPRO World XI" });
+    if (h.playmaker && h.playmaker.name === name) out.push({ season: h.season, award: "Playmaker of the Season" });
+    if (h.goldenGlove && h.goldenGlove.name === name) out.push({ season: h.season, award: "Yashin Trophy" });
+    if (h.ypoty && h.ypoty.name === name) out.push({ season: h.season, award: "Golden Boy" });
+  }
+  out.sort((a, b) => a.season - b.season);
+  return out;
+}
+
 // ---------- News ----------
 function addNews(text, tid) {
   state.news.unshift({ season: state.season, week: state.week, text, tid: tid === undefined ? null : tid });
@@ -1130,11 +1326,14 @@ const FGM = {
   WEEKS, MIN_START, MAX_START, LEAGUE_DEFS, CL_GROUP_WEEKS, CL_KO_WEEKS,
   newLeague, save, load, reset, exportJSON, importJSON,
   simWeek, simWeeks, advanceToNextSeason,
-  standings, teamMatches, leaders, bestXI, teamRatings, leagueTeams, userLeague, leagueName,
+  standings, teamMatches, leaders, bestXI, teamRatings, leagueTeams, userLeague, leagueName, compName,
   teamById, teamPlayers, freeAgents, allActivePlayers, playablePlayers,
   playerValue, askingPrice, wageFor, subRatings, seasonLabel,
   userBuy, userSell, rejectOffer, toggleListed, extendContract,
   addNews, teamName, teamAbbrev, clGroupTable, clParticipants,
+  preHistory, honoursFor, clubNameByAbbrev,
+  CUP_DEFS, cupParticipant,
+  userCups() { const t = teamById(state.userTid); return state.cups ? Object.values(state.cups).filter(c => c.league === (t ? t.league : "")) : []; },
   POS_GROUP,
   setUserTid(tid) { state.userTid = tid; },
 };

@@ -26,6 +26,15 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 - 32 teams: top four from each playable league plus Europe's best non-playable clubs
 - Real format feel: 8 groups of 4 played midweek between league rounds, then R16 → final (single-leg knockouts), with prize money, news, and history
 
+**Accolades & the record books**
+- End-of-season **Ballon d'Or** (with a three-man podium), **FIFPRO World XI**, **European Golden Boot**, **Yashin Trophy** (best keeper), **Golden Boy** (best U21) and Playmaker award
+- Real historical honours pre-filled: every real Ballon d'Or, Golden Boot, Champions League winner and league champion from 2000 up to your start season, shown in a "record books" table
+- Every player's profile lists their honours (real ones earned before your save, plus any they win in your world)
+
+**Domestic cups — every league**
+- FA Cup & EFL Cup (England), Copa del Rey (Spain), Coppa Italia (Italy), DFB-Pokal (Germany), Coupe de France (France)
+- Seeded single-elimination knockouts played midweek; top seeds get a first-round bye, draws settled on penalties, winners banked in history and club budgets
+
 **Era starts: play from any season back to 2000**
 - Start in 2000 and manage prime Zidane, Henry, Ronaldinho, Maldini, Buffon — 200+ hand-added legends with real career timelines
 - Real debuts fire on schedule: start in 2000 and Cristiano Ronaldo breaks through at Sporting in 2002, Messi at Barça in 2004…

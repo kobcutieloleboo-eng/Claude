@@ -361,3 +361,23 @@ html { scroll-behavior: smooth; }
 @media (max-width: 760px) {
   #sb-track { top: 92px; bottom: 58px; width: 8px; right: 2px; }
 }
+
+/* ---------- v2.3: accolades ---------- */
+.bdor-podium { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+.bdor-slot {
+  display: flex; align-items: center; gap: 7px; padding: 7px 13px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 20px; font-size: 13px;
+}
+.bdor-1 { border-color: var(--gold); background: #2a2410; }
+.bdor-medal { font-size: 15px; }
+.worldxi { margin-top: 12px; }
+.worldxi-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.xi-chip {
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 14px;
+  padding: 3px 10px 3px 5px; font-size: 12px; white-space: nowrap;
+}
+.honours-wrap { margin: 4px 0 6px; }
+.honours-wrap .badge { margin: 0 6px 6px 0; font-size: 12px; padding: 3px 10px; }
+.honours-detail { margin-top: 6px; }
+.honours-detail summary { cursor: pointer; color: var(--text-dim); font-size: 12.5px; }
+.honour-line { padding: 3px 0; font-size: 13px; border-bottom: 1px solid #1e2530; }
