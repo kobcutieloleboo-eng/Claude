@@ -15,6 +15,9 @@ if (typeof module !== "undefined" && typeof require !== "undefined") {
 }
 
 const WEEKS = 38;
+// Transfer budgets are scaled up so clubs can actually afford modern-inflated
+// prices — a top club can buy a galáctico, mid clubs can land real stars.
+const BUDGET_SCALE = 3.2;
 const SAVE_KEY = "footballGM_save_v2";
 const MIN_START = 2000, MAX_START = 2025;
 
@@ -242,10 +245,11 @@ function realPlayerDB() {
 
 // ---------- World creation ----------
 function createTeam(info, league) {
+  const base = info.budget || (15 + info.stature * 10); // pre-inflation spending power
   const t = {
     tid: newTid(), league, name: info.name, abbrev: info.abbrev, stadium: info.stadium,
-    colors: info.colors, stature: info.stature,
-    budget: Math.round((info.budget || (15 + info.stature * 10)) * inflation() * 10) / 10,
+    colors: info.colors, stature: info.stature, baseBudget: base,
+    budget: Math.round(base * inflation() * BUDGET_SCALE * 10) / 10,
     wageBudget: wageBudgetFor(info.stature),
     country: info.country || null, euro: !!info.euro, history: [],
   };
@@ -1022,17 +1026,24 @@ function advanceToNextSeason() {
       if (!t) continue;
       t.history.push({ season: state.season, pos: row.pos, pts: row.pts, league: def.id });
       const infl = inflation();
-      const prize = (62 - (row.pos - 1) * (44 / table.length)) * infl;
+      // Budgets are a fresh spending window each season (anchored to the club's
+      // stature) plus prize money and a slice of unspent funds — not a bank that
+      // compounds forever.
+      const allowance = (t.baseBudget || (15 + t.stature * 10)) * infl * BUDGET_SCALE;
+      const prize = (62 - (row.pos - 1) * (44 / table.length)) * infl * BUDGET_SCALE;
+      const carry = Math.min(Math.max(0, t.budget), allowance) * 0.4;
       const wageBillYr = teamPlayers(t.tid).reduce((s, p) => s + p.wage, 0) * 52 / 1000;
-      t.budget = clamp(Math.round((t.budget + prize + t.stature * 9 * infl - wageBillYr * 0.45) * 10) / 10, 5 * infl, 320 * infl);
+      t.budget = clamp(Math.round((allowance * 0.7 + prize + carry - wageBillYr * 0.2) * 10) / 10, 5 * infl, allowance * 2.2 + 60 * infl);
     }
   }
   for (const t of state.teams.filter(x => x.league === "FOR")) {
-    t.budget = clamp(Math.round((t.budget + (12 + t.stature * 8) * inflation()) * 10) / 10, 5, 200 * inflation());
+    const allowance = (t.baseBudget || (15 + t.stature * 10)) * inflation() * BUDGET_SCALE;
+    const carry = Math.min(Math.max(0, t.budget), allowance) * 0.4;
+    t.budget = clamp(Math.round((allowance * 0.75 + carry) * 10) / 10, 5, allowance * 2);
   }
-  // CL prize money
+  // CL prize money (clubs still in the competition)
   if (state.cl) {
-    for (const tid of clParticipants()) { const t = teamById(tid); if (t) t.budget = Math.round((t.budget + 9 * inflation()) * 10) / 10; }
+    for (const tid of clParticipants()) { const t = teamById(tid); if (t) t.budget = Math.round((t.budget + 12 * inflation() * BUDGET_SCALE) * 10) / 10; }
   }
 
   // 3. Promotion & relegation per league
