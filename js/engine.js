@@ -96,7 +96,20 @@ let state = null;
 function newPid() { return state.nextPid++; }
 function newTid() { return state.nextTid++; }
 
-function wageFor(ovr) { return Math.max(5, Math.round(1.4 * Math.pow(1.125, ovr - 50))); }
+// Era inflation: transfer fees & wages relative to the 2025 baseline (=1.0).
+// ~7%/yr means a 2000 world runs at ~0.18x (no £300m clauses back then), and
+// future seasons keep inflating past 2025 too. Clamped so it never gets silly.
+function inflation(season) {
+  const s = season !== undefined ? season : (state ? state.season : MAX_START);
+  return clamp(Math.pow(1.07, s - MAX_START), 0.12, 6);
+}
+// Wage inflation is a touch gentler than fee inflation.
+function wageInflation(season) {
+  const s = season !== undefined ? season : (state ? state.season : MAX_START);
+  return clamp(Math.pow(1.055, s - MAX_START), 0.2, 5);
+}
+
+function wageFor(ovr) { return Math.max(2, Math.round(1.4 * Math.pow(1.125, ovr - 50) * wageInflation())); }
 
 function playerValue(p) {
   let v = 0.35 * Math.pow(1.155, p.ovr - 50);
@@ -106,7 +119,21 @@ function playerValue(p) {
   else if (a <= 29) m = 1.0; else if (a <= 31) m = 0.6; else if (a <= 33) m = 0.35; else m = 0.18;
   v *= m;
   if (a <= 23 && p.pot > p.ovr) v *= 1 + (p.pot - p.ovr) * 0.035;
+  v *= inflation();
   return Math.max(0.1, Math.round(v * 10) / 10);
+}
+
+// A club's weekly wage budget (£k/week), from stature and era inflation.
+function wageBudgetFor(stature) {
+  return Math.round((500 + stature * stature * 120) * wageInflation());
+}
+function wageBill(tid) { return teamPlayers(tid).reduce((s, p) => s + p.wage, 0); }
+// Keep a club's wage budget sensible: from stature/inflation, but always with
+// headroom above what they're already paying.
+function calibrateWageBudget(t) {
+  const bill = wageBill(t.tid);
+  const base = wageBudgetFor(t.stature);
+  t.wageBudget = Math.round(Math.max(base, bill * 1.15));
 }
 
 function makePlayer(name, pos, age, ovr, pot, natl, tid, opts) {
@@ -217,7 +244,9 @@ function realPlayerDB() {
 function createTeam(info, league) {
   const t = {
     tid: newTid(), league, name: info.name, abbrev: info.abbrev, stadium: info.stadium,
-    colors: info.colors, stature: info.stature, budget: info.budget || (15 + info.stature * 10),
+    colors: info.colors, stature: info.stature,
+    budget: Math.round((info.budget || (15 + info.stature * 10)) * inflation() * 10) / 10,
+    wageBudget: wageBudgetFor(info.stature),
     country: info.country || null, euro: !!info.euro, history: [],
   };
   state.teams.push(t);
@@ -250,6 +279,7 @@ function newLeague(startSeason, userLeagueId, userClubAbbrev) {
     seedEraSquads(startSeason);
     for (const t of state.teams) fillSquad(t, true);
   }
+  for (const t of state.teams) calibrateWageBudget(t);
 
   // Schedules
   for (const id of Object.keys(state.leagues)) buildLeagueSeason(id);
@@ -772,6 +802,20 @@ function concludeSeason() {
   const ypoty = pool.filter(p => p.age <= 21).sort((a, b) => score(b) - score(a))[0];
   const clW = state.cl && state.cl.winner ? teamById(state.cl.winner) : null;
 
+  // Per-league awards: a Golden Boot (top scorer) and Player of the Season
+  // for each of the five playable leagues.
+  const leagueAwards = {};
+  for (const def of LEAGUE_DEFS) {
+    const inLeague = pool.filter(p => { const t = teamById(p.tid); return t && t.league === def.id; });
+    if (!inLeague.length) { leagueAwards[def.id] = null; continue; }
+    const topScorer = inLeague.slice().sort((a, b) => b.stats.goals - a.stats.goals || score(b) - score(a))[0];
+    const lpoty = inLeague.slice().sort((a, b) => score(b) - score(a))[0];
+    leagueAwards[def.id] = {
+      boot: award(topScorer, topScorer.stats.goals, "goals"),
+      poty: award(lpoty, Math.round(score(lpoty)), "rating"),
+    };
+  }
+
   // Ballon d'Or: season score plus silverware bonuses
   const champTids = new Set(Object.values(champions).map(c => c.tid));
   const bdorScore = p => {
@@ -807,6 +851,7 @@ function concludeSeason() {
     goldenGlove: glove ? award(glove, glove.stats.cs, "clean sheets") : null,
     poty: poty ? award(poty, Math.round(score(poty)), "rating") : null,
     ypoty: ypoty ? award(ypoty, Math.round(score(ypoty)), "rating") : null,
+    leagueAwards,
     bdor: bdorPodium,
     worldXI,
     cups: state.cups ? Object.values(state.cups).filter(c => c.winner !== null).map(c => {
@@ -820,6 +865,10 @@ function concludeSeason() {
   state.history.push(entry);
   if (bdorPodium.length) addNews(`🏅 Ballon d'Or: ${bdorPodium[0].name} (${bdorPodium[0].team})! Podium: ${bdorPodium.map((b, i) => `${i + 1}. ${b.name}`).join(", ")}.`);
   if (boot) addNews(`👟 European Golden Boot: ${boot.name} (${teamName(boot.tid)}) with ${boot.stats.goals} goals.`);
+  for (const def of LEAGUE_DEFS) {
+    const la = leagueAwards[def.id];
+    if (la) addNews(`👟 ${def.name} Golden Boot: ${la.boot.name} (${la.boot.abbrev}), ${la.boot.value} goals · Player of the Season: ${la.poty.name}.`);
+  }
   if (worldXI.length) addNews(`🌍 FIFPRO World XI announced: ${worldXI.map(w => w.name).join(", ")}.`);
   if (glove) addNews(`🧤 Yashin Trophy: ${glove.name} (${teamName(glove.tid)}) with ${glove.stats.cs} clean sheets.`);
   if (ypoty) addNews(`🌟 Golden Boy: ${ypoty.name} (${teamName(ypoty.tid)}).`);
@@ -864,17 +913,18 @@ function advanceToNextSeason() {
       const t = teamById(row.tid);
       if (!t) continue;
       t.history.push({ season: state.season, pos: row.pos, pts: row.pts, league: def.id });
-      const prize = 62 - (row.pos - 1) * (44 / table.length);
+      const infl = inflation();
+      const prize = (62 - (row.pos - 1) * (44 / table.length)) * infl;
       const wageBillYr = teamPlayers(t.tid).reduce((s, p) => s + p.wage, 0) * 52 / 1000;
-      t.budget = clamp(Math.round((t.budget + prize + t.stature * 9 - wageBillYr * 0.45) * 10) / 10, 5, 320);
+      t.budget = clamp(Math.round((t.budget + prize + t.stature * 9 * infl - wageBillYr * 0.45) * 10) / 10, 5 * infl, 320 * infl);
     }
   }
   for (const t of state.teams.filter(x => x.league === "FOR")) {
-    t.budget = clamp(Math.round((t.budget + 12 + t.stature * 8) * 10) / 10, 5, 200);
+    t.budget = clamp(Math.round((t.budget + (12 + t.stature * 8) * inflation()) * 10) / 10, 5, 200 * inflation());
   }
   // CL prize money
   if (state.cl) {
-    for (const tid of clParticipants()) { const t = teamById(tid); if (t) t.budget = Math.round((t.budget + 9) * 10) / 10; }
+    for (const tid of clParticipants()) { const t = teamById(tid); if (t) t.budget = Math.round((t.budget + 9 * inflation()) * 10) / 10; }
   }
 
   // 3. Promotion & relegation per league
@@ -917,6 +967,7 @@ function advanceToNextSeason() {
   for (const id of Object.keys(state.leagues)) buildLeagueSeason(id);
   setupChampionsLeague(false);
   setupCups();
+  for (const t of state.teams) calibrateWageBudget(t);
 
   const ut = teamById(state.userTid);
   addNews(`A new ${seasonLabel()} season kicks off! ${ut.name} start with a £${ut.budget}m transfer kitty.`);
@@ -1244,11 +1295,23 @@ function evaluateContractOffer(p, demand, offerWage, offerYears, round) {
   return { accepted: false, counter: { wage: Math.min(counterWage, demand.wage), years: counterYears } };
 }
 
+// Headroom in the user's wage budget if `pid`'s wage becomes `newWage`.
+function wageRoomAfter(tid, pid, newWage) {
+  const t = teamById(tid);
+  if (!t || t.wageBudget === undefined) return Infinity;
+  const cur = state.players[pid];
+  const billExcl = wageBill(tid) - (cur && cur.tid === tid ? cur.wage : 0);
+  return t.wageBudget - (billExcl + newWage);
+}
+
 // Apply an agreed extension for one of the user's own players.
 function agreeExtension(pid, wage, years) {
   const p = state.players[pid];
   if (!p || p.tid !== state.userTid) return { ok: false, msg: "Not your player." };
-  p.wage = Math.max(5, Math.round(wage));
+  if (wageRoomAfter(state.userTid, pid, Math.round(wage)) < 0) {
+    return { ok: false, msg: `That wage blows your budget — you'd be £${Math.round(-wageRoomAfter(state.userTid, pid, Math.round(wage)))}k/week over the cap.` };
+  }
+  p.wage = Math.max(2, Math.round(wage));
   p.years = clamp(Math.round(years), 1, 6);
   delete p.agitateFor;
   p.listed = false;
@@ -1266,10 +1329,13 @@ function agreeSigning(pid, wage, years) {
   if (price > user.budget) return { ok: false, msg: `Not enough budget (need £${price}m, have £${user.budget}m).` };
   const seller = p.tid >= 0 ? teamById(p.tid) : null;
   if (seller && teamPlayers(seller.tid).length <= 15) return { ok: false, msg: `${seller.name} refuse — their squad is too thin.` };
+  if (user.wageBudget !== undefined && wageBill(user.tid) + Math.round(wage) > user.wageBudget) {
+    return { ok: false, msg: `Those wages breach your budget (£${wageBill(user.tid) + Math.round(wage)}k/week vs £${user.wageBudget}k cap).` };
+  }
   const wasFA = p.tid === -1;
   transferPlayer(p, state.userTid, wasFA ? 0 : price, seller);
   if (wasFA) user.budget = Math.round((user.budget - price) * 10) / 10;
-  p.wage = Math.max(5, Math.round(wage));
+  p.wage = Math.max(2, Math.round(wage));
   p.years = clamp(Math.round(years), 1, 6);
   return { ok: true, msg: `${p.name} signs for ${user.name} on a ${p.years}-year deal!` };
 }
@@ -1395,6 +1461,14 @@ function honoursFor(name) {
     if (h.playmaker && h.playmaker.name === name) out.push({ season: h.season, award: "Playmaker of the Season" });
     if (h.goldenGlove && h.goldenGlove.name === name) out.push({ season: h.season, award: "Yashin Trophy" });
     if (h.ypoty && h.ypoty.name === name) out.push({ season: h.season, award: "Golden Boy" });
+    if (h.leagueAwards) {
+      for (const def of LEAGUE_DEFS) {
+        const la = h.leagueAwards[def.id];
+        if (!la) continue;
+        if (la.boot && la.boot.name === name) out.push({ season: h.season, award: `${def.name} Golden Boot` });
+        if (la.poty && la.poty.name === name) out.push({ season: h.season, award: `${def.name} Player of the Season` });
+      }
+    }
   }
   out.sort((a, b) => a.season - b.season);
   return out;
@@ -1442,6 +1516,7 @@ const FGM = {
   standings, teamMatches, leaders, bestXI, teamRatings, leagueTeams, userLeague, leagueName, compName,
   teamById, teamPlayers, freeAgents, allActivePlayers, playablePlayers,
   playerValue, askingPrice, wageFor, subRatings, seasonLabel,
+  inflation, wageBill, wageRoomAfter, wageBudgetFor,
   userBuy, userSell, rejectOffer, toggleListed,
   contractDemand, evaluateContractOffer, agreeExtension, agreeSigning,
   addNews, teamName, teamAbbrev, clGroupTable, clParticipants,

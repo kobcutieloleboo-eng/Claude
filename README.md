@@ -27,7 +27,8 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 - Real format feel: 8 groups of 4 played midweek between league rounds, then R16 → final (single-leg knockouts), with prize money, news, and history
 
 **Accolades & the record books**
-- End-of-season **Ballon d'Or** (with a three-man podium), **FIFPRO World XI**, **European Golden Boot**, **Yashin Trophy** (best keeper), **Golden Boy** (best U21) and Playmaker award
+- A dedicated **Season Review** page: the full year-end ceremony in one place — Ballon d'Or podium, all five league champions, a **Golden Boot and Player of the Season for every league**, global awards, cup winners and the FIFPRO World XI
+- End-of-season **Ballon d'Or** (with a three-man podium), **FIFPRO World XI**, per-league **Golden Boots** & **Players of the Season**, **European Golden Boot**, **Yashin Trophy** (best keeper), **Golden Boy** (best U21) and Playmaker award
 - Real historical honours pre-filled: every real Ballon d'Or, Golden Boot, Champions League winner and league champion from 2000 up to your start season, shown in a "record books" table
 - Every player's profile lists their honours (real ones earned before your save, plus any they win in your world)
 
@@ -57,6 +58,9 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 - **Live match viewer**: "Watch next match" plays your game out minute-by-minute with a running clock, progress bar and goal-by-goal feed (skippable)
 - **Contract negotiations**: signings and renewals are multi-round talks — the player names wage + length demands, you counter with steppers, they soften or walk; lowball too hard and the deal collapses
 - **Performance-based development, every season**: ratings rise and fall on how a player actually did that year, relative to what's expected for their rating & position — a striker who bangs in 30 climbs, a benched veteran slips, career years can nudge past potential — applied for all seasons, not just the first
+- **Wage budgets**: every club has a weekly wage cap alongside its transfer budget; signings and renewals draw against it and are blocked if they breach it (shown live in the negotiation and on the Finances page)
+- **Era-scaled economy**: transfer fees, wages and budgets inflate ~7%/yr, so a 2000 save runs on 2000 money (no £300m release clauses back then) and future seasons keep inflating
+- **Search every player**: a dedicated search page finds anyone in the world by name — active, on loan abroad, a free agent, or retired
 - Transfer market: buy anyone in the world after agreeing a fee and terms, transfer-list players to attract AI bids, sign free agents, January + summer windows, AI clubs squad-build on their own
 - Finances: transfer budgets, wage bills, prize money by league finish
 - End-of-season awards (Golden Boot, Playmaker, Golden Glove, Player & Young Player of the Season) and a permanent league history

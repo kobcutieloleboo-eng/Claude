@@ -246,8 +246,8 @@ function render(args) {
   const views = {
     dashboard: viewDashboard, roster: viewRoster, standings: viewStandings,
     fixtures: viewFixtures, europe: viewEurope, cups: viewCups, stats: viewStats, players: viewAllPlayers,
-    transfers: viewTransfers, finances: viewFinances, history: viewHistory,
-    news: viewNews, settings: viewSettings,
+    search: viewSearch, transfers: viewTransfers, finances: viewFinances,
+    review: viewSeasonReview, history: viewHistory, news: viewNews, settings: viewSettings,
   };
   (views[currentView] || viewDashboard)(args || []);
 }
@@ -608,19 +608,25 @@ function viewFinances() {
   const t = FGM.teamById(s.userTid);
   const players = FGM.teamPlayers(s.userTid);
   const wageBill = players.reduce((sum, p) => sum + p.wage, 0);
+  const cap = t.wageBudget || FGM.wageBudgetFor(t.stature);
+  const pct = Math.min(100, Math.round(wageBill / cap * 100));
+  const over = wageBill > cap;
   const yearly = Math.round(wageBill * 52 / 100) / 10;
-  const top = players.slice().sort((a, b) => b.wage - a.wage).slice(0, 10)
+  const top = players.slice().sort((a, b) => b.wage - a.wage).slice(0, 12)
     .map(p => `<tr><td>${playerLink(p)}</td><td>${posBadge(p.pos)}</td><td class="num">£${p.wage}k</td><td class="num">${p.years}</td></tr>`).join("");
   content.innerHTML = `
     <h1>Finances</h1>
     <div class="cards">
-      <div class="card"><h3>Transfer budget</h3><p class="big money">${money(t.budget)}</p></div>
-      <div class="card"><h3>Wage bill</h3><p class="big">£${wageBill}k <span class="mute" style="font-size:14px">/week</span></p><p class="mute">≈ ${money(yearly)} per year</p></div>
-      <div class="card"><h3>Club stature</h3><p class="big">${"★".repeat(t.stature)}${"☆".repeat(5 - t.stature)}</p><p class="mute">Drives sponsorship &amp; youth quality</p></div>
+      <div class="card"><h3>Transfer budget</h3><p class="big money">${money(t.budget)}</p><p class="mute">Fees only — wages come out of the wage budget</p></div>
+      <div class="card"><h3>Wage budget</h3>
+        <p class="big ${over ? "neg" : ""}">£${wageBill}k <span class="mute" style="font-size:14px">/ £${cap}k per week</span></p>
+        <div class="wage-bar"><div class="wage-fill ${over ? "over" : pct > 85 ? "warn" : ""}" style="width:${pct}%"></div></div>
+        <p class="mute">${over ? "⚠ Over budget — sell or trim wages before signing." : `${pct}% used · £${cap - wageBill}k/week headroom`}</p></div>
+      <div class="card"><h3>Club stature</h3><p class="big">${"★".repeat(t.stature)}${"☆".repeat(5 - t.stature)}</p><p class="mute">≈ ${money(yearly)}/yr in wages · drives sponsorship &amp; youth</p></div>
     </div>
     <h2>Top earners</h2>
     <div class="tbl-wrap"><table><thead><tr><th>Player</th><th>Pos</th><th class="num">Wage</th><th class="num">Years</th></tr></thead><tbody>${top}</tbody></table></div>
-    <p class="mute" style="margin-top:10px">Season income: league prize money by final position, sponsorship by stature, Champions League participation & progress bonuses — minus part of the wage bill.</p>`;
+    <p class="mute" style="margin-top:10px">Transfer income: league prize money by final position, sponsorship by stature, Champions League bonuses — minus part of the wage bill. Wages and fees both scale with the era (a 2000 save runs on 2000 money).</p>`;
 }
 
 function viewHistory() {
@@ -649,6 +655,7 @@ function viewHistory() {
           ${aw("🌟 Golden Boy", h.ypoty)}
         </tbody></table></div></div>
       </div>
+      ${leagueAwardsBlock(h)}
       ${xi}${cupsHtml}</div>`;
   }).join("");
   const pre = FGM.preHistory();
@@ -667,6 +674,130 @@ function viewHistory() {
   content.innerHTML = `<h1>History</h1>
     ${s.history.length ? `<div class="cards" style="flex-direction:column">${blocks}</div>` : "<p class='mute'>No completed seasons in your save yet — your first Ballon d'Or night comes at the end of this season.</p>"}
     ${preBlock}`;
+}
+
+// Per-league Golden Boots + Players of the Season table for a history entry.
+function leagueAwardsBlock(h) {
+  if (!h.leagueAwards) return "";
+  const rows = FGM.LEAGUE_DEFS.map(d => {
+    const la = h.leagueAwards[d.id];
+    if (!la) return "";
+    return `<tr><td>${esc(d.name)}</td>
+      <td>👟 ${esc(la.boot.name)} <span class="mute">${esc(la.boot.abbrev)}</span> <span class="num">${la.boot.value}g</span></td>
+      <td>⭐ ${esc(la.poty.name)} <span class="mute">${esc(la.poty.abbrev)}</span></td></tr>`;
+  }).join("");
+  if (!rows) return "";
+  return `<div class="worldxi"><strong>👟 Golden Boots &amp; Players of the Season — by league</strong>
+    <div class="tbl-wrap"><table><thead><tr><th>League</th><th>Golden Boot</th><th>Player of the Season</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+// ---------- Season Review (dedicated year-end results) ----------
+function viewSeasonReview() {
+  const s = FGM.state;
+  if (!s.history.length) {
+    content.innerHTML = `<h1>🏅 Season Review</h1>
+      <p class='mute'>Your first season is still in progress. When it finishes, the full end-of-season awards ceremony — Ballon d'Or, FIFPRO World XI, every league's Golden Boot and Player of the Season, cup winners and champions — lands here.</p>`;
+    return;
+  }
+  const h = s.history[s.history.length - 1];
+  const teamByAbbrev = ab => s.teams.find(t => t.abbrev === ab);
+  const nameChip = a => a ? `<span class="player-search" data-name="${esc(a.name)}">${esc(a.name)}</span> <span class="mute">${esc(a.abbrev)}</span>` : "—";
+
+  const podium = (h.bdor && h.bdor.length)
+    ? `<div class="bdor-podium">${h.bdor.map((b, i) => `<div class="bdor-slot bdor-${i + 1}"><span class="bdor-medal">${["🥇", "🥈", "🥉"][i]}</span><strong>${esc(b.name)}</strong><span class="mute">${esc(b.abbrev)}</span></div>`).join("")}</div>`
+    : "";
+  const champCards = FGM.LEAGUE_DEFS.map(d => {
+    const c = h.champions[d.id]; if (!c) return "";
+    const t = teamByAbbrev(c.abbrev);
+    return `<div class="review-champ" ${t ? `style="border-left:4px solid ${t.colors[0]}"` : ""}>
+      <div class="mute">${esc(d.name)}</div><div class="review-champ-name">🏆 ${esc(c.name)}</div><div class="mute">${c.pts} pts</div></div>`;
+  }).join("");
+  const leagueRows = FGM.LEAGUE_DEFS.map(d => {
+    const la = h.leagueAwards ? h.leagueAwards[d.id] : null;
+    if (!la) return "";
+    return `<tr><td><strong>${esc(d.name)}</strong></td>
+      <td>👟 ${nameChip(la.boot)} <span class="num">${la.boot.value}g</span></td>
+      <td>⭐ ${nameChip(la.poty)}</td></tr>`;
+  }).join("");
+  const indiv = [
+    ["🏅 Ballon d'Or", h.bdor && h.bdor[0]],
+    ["👟 European Golden Boot", h.goldenBoot],
+    ["🎯 Playmaker of the Season", h.playmaker],
+    ["🧤 Yashin Trophy", h.goldenGlove],
+    ["🌟 Golden Boy (best U21)", h.ypoty],
+  ].filter(x => x[1]).map(([label, a]) => `<tr><td>${label}</td><td>${nameChip(a)}</td></tr>`).join("");
+  const xi = (h.worldXI && h.worldXI.length)
+    ? `<div class="worldxi-chips">${h.worldXI.map(w => `<span class="xi-chip">${posBadge(w.pos)} <span class="player-search" data-name="${esc(w.name)}">${esc(w.name)}</span> <span class="mute">${esc(w.abbrev)}</span></span>`).join("")}</div>`
+    : "<p class='mute'>—</p>";
+  const cups = (h.cups && h.cups.length)
+    ? `<div class="worldxi-chips">${h.cups.map(c => `<span class="xi-chip">${esc(c.name)}: <strong>${esc(c.winner)}</strong></span>`).join("")}</div>`
+    : "<p class='mute'>—</p>";
+
+  content.innerHTML = `
+    <h1>🏅 ${FGM.seasonLabel(h.season)} Season Review</h1>
+    <p class="sub">The full end-of-season ceremony. Your finish: <strong>${h.userPos}${ord(h.userPos)}</strong> in the ${esc(FGM.leagueName(h.userLeague))} with ${esc(h.userTeam)}.${h.clWinner ? ` · 🏆⭐ ${esc(h.clWinner.name)} won the Champions League.` : ""}</p>
+    <div class="card" style="border-color:var(--gold)"><h3>🏅 Ballon d'Or</h3>${podium || "<p class='mute'>—</p>"}</div>
+    <h2>League champions</h2>
+    <div class="review-champs">${champCards}</div>
+    <h2>Golden Boots &amp; Players of the Season — every league</h2>
+    <div class="tbl-wrap"><table><thead><tr><th>League</th><th>Golden Boot</th><th>Player of the Season</th></tr></thead><tbody>${leagueRows}</tbody></table></div>
+    <div class="flex" style="margin-top:8px">
+      <div><h2>Global individual awards</h2><div class="tbl-wrap"><table><tbody>${indiv}</tbody></table></div></div>
+      <div><h2>🏆 Cup winners</h2>${cups}</div>
+    </div>
+    <h2>🌍 FIFPRO World XI</h2>${xi}
+    <p class="mute" style="margin-top:14px"><a href="#history">See all past seasons in League History →</a></p>`;
+}
+
+// ---------- Search every player ----------
+let searchQuery = "";
+function viewSearch(args) {
+  if (args && args.length && !searchQuery) searchQuery = decodeURIComponent(args[0]);
+  const q = searchQuery.trim().toLowerCase();
+  let results = [];
+  if (q.length >= 2) {
+    const all = Object.values(FGM.state.players).filter(p => p.name.toLowerCase().includes(q));
+    // active first (by rating), then retired/foreign
+    all.sort((a, b) => {
+      const ar = a.retired ? 2 : (a.tid >= 0 ? 0 : 1), br = b.retired ? 2 : (b.tid >= 0 ? 0 : 1);
+      return ar - br || b.ovr - a.ovr;
+    });
+    results = all.slice(0, 80);
+  }
+  const rows = results.map(p => {
+    const club = p.retired ? "Retired" : (p.tid >= 0 ? `${esc(FGM.teamAbbrev(p.tid))} <span class="mute">${esc(FGM.leagueName(FGM.teamById(p.tid).league))}</span>` : "Free agent");
+    return `<tr>
+      <td>${playerLink(p)}${p.retired ? " <span class='badge badge-inj'>RET</span>" : ""}</td>
+      <td>${posBadge(p.pos)}</td><td class="num">${p.age}</td><td class="num">${ovrSpan(p.ovr)}</td>
+      <td class="mute">${esc(p.natl)}</td><td>${club}</td><td class="num">${money(FGM.playerValue(p))}</td></tr>`;
+  }).join("");
+  content.innerHTML = `
+    <h1>🔎 Search Players</h1>
+    <p class="sub">Find any player in the world — active, free agent, abroad or retired.</p>
+    <div class="controls">
+      <input type="text" id="search-input" placeholder="Type a name… (e.g. Messi, Haaland, Zidane)" value="${esc(searchQuery)}" style="flex:1;min-width:220px;font-size:15px;padding:9px 12px" autocomplete="off">
+      ${searchQuery ? `<button class="btn" id="search-clear">Clear</button>` : ""}
+    </div>
+    ${q.length < 2
+      ? "<p class='mute'>Type at least 2 letters to search.</p>"
+      : results.length
+        ? `<p class="mute">${results.length}${results.length === 80 ? "+" : ""} result${results.length === 1 ? "" : "s"}</p>
+           <div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Pos</th><th class="num">Age</th><th class="num">Ovr</th><th>Nation</th><th>Club</th><th class="num">Value</th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : "<p class='mute'>No players match that search.</p>"}`;
+  const input = document.getElementById("search-input");
+  if (input) {
+    input.focus();
+    // keep cursor at end
+    const v = input.value; input.value = ""; input.value = v;
+    let deb;
+    input.addEventListener("input", e => {
+      searchQuery = e.target.value;
+      clearTimeout(deb);
+      deb = setTimeout(() => { viewSearch([]); }, 160);
+    });
+  }
+  const clear = document.getElementById("search-clear");
+  if (clear) clear.addEventListener("click", () => { searchQuery = ""; viewSearch([]); });
 }
 
 function viewNews() {
@@ -828,6 +959,13 @@ function showMatchModal(m) {
 document.addEventListener("click", e => {
   const pl = e.target.closest(".player-link");
   if (pl) { showPlayerModal(parseInt(pl.dataset.pid, 10)); return; }
+  const ps = e.target.closest(".player-search");
+  if (ps) {
+    const name = ps.dataset.name;
+    const match = Object.values(FGM.state.players).find(p => p.name === name);
+    if (match) showPlayerModal(match.pid);
+    return;
+  }
   const tl = e.target.closest(".team-link");
   if (tl) { showTeamModal(parseInt(tl.dataset.tid, 10)); return; }
   const mo = e.target.closest(".match-open");
@@ -912,12 +1050,13 @@ function renderNegotiation(neg) {
       </div>
     </div>
     ${logHtml ? `<div class="neg-log">${logHtml}</div>` : ""}
+    ${wageRoomHtml(neg)}
     <div class="controls" style="margin-top:14px">
       <button class="btn btn-accent" data-neg-submit="1" ${neg.done ? "disabled" : ""}>Make offer (round ${neg.round}/${neg.maxRounds})</button>
       <button class="btn" data-neg-meet="1" ${neg.done ? "disabled" : ""}>Meet their demand</button>
       <button class="btn" data-neg-cancel="1">Walk away</button>
     </div>
-    <p class="mute" style="margin-top:6px">Higher wages hit your season finances; lowball too hard and they'll walk.</p>`);
+    <p class="mute" style="margin-top:6px">Wages draw against your wage budget; lowball too hard and they'll walk.</p>`);
 
   document.querySelectorAll("[data-neg-wage]").forEach(b => b.addEventListener("click", () => {
     neg.offerWage = Math.max(5, neg.offerWage + parseInt(b.dataset.negWage, 10) * wageStep);
@@ -934,6 +1073,20 @@ function renderNegotiation(neg) {
 }
 
 function clampN(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// Show how the offered wage sits against the user's wage budget.
+function wageRoomHtml(neg) {
+  const t = FGM.teamById(FGM.state.userTid);
+  if (!t || t.wageBudget === undefined) return "";
+  const room = FGM.wageRoomAfter(FGM.state.userTid, neg.pid, neg.offerWage);
+  const cap = t.wageBudget, bill = FGM.wageBill(t.tid);
+  const projected = neg.context === "sign" ? bill + neg.offerWage : bill - (FGM.state.players[neg.pid].wage) + neg.offerWage;
+  const over = room < 0;
+  return `<div class="neg-budget ${over ? "neg-over" : ""}">
+    Wage budget: £${projected}k / £${cap}k per week
+    ${over ? `<strong> — £${Math.round(-room)}k over the cap</strong>` : `· £${Math.round(room)}k headroom`}
+  </div>`;
+}
 
 function submitOffer(neg) {
   const p = FGM.state.players[neg.pid];
