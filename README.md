@@ -54,8 +54,10 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 
 **The full management loop**
 - Poisson-based match engine driven by best-XI attack/defense ratings, with scorers, assists, clean sheets, and injuries
-- League table with form guide, fixtures & results with match detail, stat leaders
-- Transfer market: buy anyone for the right price, transfer-list players to attract AI bids, sign free agents, contract extensions, January + summer windows, AI clubs squad-build on their own
+- **Live match viewer**: "Watch next match" plays your game out minute-by-minute with a running clock, progress bar and goal-by-goal feed (skippable)
+- **Contract negotiations**: signings and renewals are multi-round talks — the player names wage + length demands, you counter with steppers, they soften or walk; lowball too hard and the deal collapses
+- **Performance-based development, every season**: ratings rise and fall on how a player actually did that year, relative to what's expected for their rating & position — a striker who bangs in 30 climbs, a benched veteran slips, career years can nudge past potential — applied for all seasons, not just the first
+- Transfer market: buy anyone in the world after agreeing a fee and terms, transfer-list players to attract AI bids, sign free agents, January + summer windows, AI clubs squad-build on their own
 - Finances: transfer budgets, wage bills, prize money by league finish
 - End-of-season awards (Golden Boot, Playmaker, Golden Glove, Player & Young Player of the Season) and a permanent league history
 - Promotion & relegation with real Championship clubs (your club is protected from the drop — the board "finds a way")

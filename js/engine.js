@@ -1025,6 +1025,31 @@ function handleRelegation(leagueId) {
   }
 }
 
+// How well did the player perform this season, relative to what's expected for
+// their rating & position? Returns roughly -1 (awful) .. +1.6 (career year).
+function seasonPerformanceIndex(p) {
+  const apps = p.stats.apps;
+  if (apps < 6) return null; // barely featured — handled separately (rust)
+  const per = x => x / apps;
+  const grp = POS_GROUP[p.pos];
+  const g = p.stats.goals, a = p.stats.assists, cs = p.stats.cs;
+  let val, exp;
+  if (grp === "FW") {
+    val = per(g + a * 0.6);
+    exp = Math.max(0.16, (p.ovr - 58) / 40 * 0.62);
+  } else if (grp === "MF") {
+    val = per(g + a);
+    exp = Math.max(0.12, (p.ovr - 58) / 40 * 0.48);
+  } else if (grp === "DF") {
+    val = per(cs) + per(g + a) * 0.6;
+    exp = Math.max(0.18, (p.ovr - 55) / 45 * 0.34);
+  } else { // GK
+    val = per(cs);
+    exp = Math.max(0.22, (p.ovr - 55) / 45 * 0.42);
+  }
+  return clamp((val - exp) / exp, -1, 1.6);
+}
+
 function developAllPlayers() {
   for (const p of Object.values(state.players)) {
     if (p.retired) continue;
@@ -1038,10 +1063,31 @@ function developAllPlayers() {
     else if (a <= 31 + gkShift) d = ri(-2, 0);
     else if (a <= 33 + gkShift) d = ri(-4, -1);
     else d = ri(-6, -2);
-    if (d > 0 && p.stats.apps >= 20) d += rand() < 0.4 ? 1 : 0;
-    if (d > 0) p.ovr = clamp(p.ovr + d, 40, p.pot);
-    else p.ovr = clamp(p.ovr + d, 40, 99);
-    if (a <= 23) p.pot = clamp(p.pot + ri(-2, 2), p.ovr, 96);
+
+    // Performance this season nudges the rating up or down, every season.
+    const perf = seasonPerformanceIndex(p);
+    let perfD = 0;
+    if (perf === null) {
+      perfD = (a <= 21) ? 0 : -1; // benched: prospects unaffected, veterans rust
+    } else {
+      perfD = Math.round(perf * 3.2); // -3 .. +5
+      if (p.stats.apps >= 30 && perf > 0.3) perfD += 1; // full season of quality
+      // A standout season can lift a young player's ceiling.
+      if (a <= 23 && perf >= 0.7) p.pot = clamp(p.pot + ri(1, 3), p.ovr, 97);
+      // A veteran defying age hangs on: cancel some age decline if producing.
+      if (a >= 30 && perf > 0.4 && d < 0) d = Math.min(0, d + 2);
+    }
+    perfD = clamp(perfD, -4, 5);
+    let total = d + perfD;
+
+    if (total > 0) {
+      // Growth caps at potential — but a genuine career year can nudge just past it.
+      const ceiling = perf !== null && perf >= 1.0 ? Math.min(99, p.pot + 1) : p.pot;
+      p.ovr = clamp(p.ovr + total, 40, ceiling);
+    } else {
+      p.ovr = clamp(p.ovr + total, 40, 99);
+    }
+    if (a <= 23) p.pot = clamp(p.pot + ri(-2, 2), p.ovr, 97);
     else p.pot = Math.max(p.ovr, p.pot - 1);
     p.age++;
 
@@ -1152,13 +1198,80 @@ function toggleListed(pid) {
   if (p && p.tid === state.userTid) { p.listed = !p.listed; if (p.listed) generateOffersForUser(p.pid); }
 }
 
-function extendContract(pid) {
+// ---------- Contract negotiations ----------
+// What a player wants in a new/extended deal. `context` = "extend" | "sign".
+function contractDemand(p, context) {
+  const base = wageFor(p.ovr);
+  // Star players and in-demand youngsters want a premium; a new signing asks more.
+  let mult = 1.0;
+  if (p.ovr >= 86) mult = 1.45;
+  else if (p.ovr >= 82) mult = 1.3;
+  else if (p.ovr >= 78) mult = 1.18;
+  else if (p.ovr >= 72) mult = 1.08;
+  if (p.age <= 22 && p.pot >= p.ovr + 6) mult += 0.12; // wonderkid premium
+  if (context === "sign") mult *= 1.08;               // moving clubs costs more
+  const wage = Math.max(5, Math.round(base * mult));
+  // Younger players want longer security; older want shorter.
+  let years;
+  if (p.age <= 24) years = 5;
+  else if (p.age <= 28) years = 4;
+  else if (p.age <= 31) years = 3;
+  else years = 2;
+  return { wage, years };
+}
+
+// Evaluate the user's proposed { wage, years } against the player's demand.
+// Returns { accepted } or { accepted:false, counter, walk } where `counter`
+// is the player's revised (softened) demand and `walk` ends the talks.
+function evaluateContractOffer(p, demand, offerWage, offerYears, round) {
+  const wr = offerWage / demand.wage;
+  const yearsOff = Math.abs(offerYears - demand.years);
+  // Insultingly low → player may walk on later rounds.
+  if (wr < 0.72) {
+    if (round >= 2) return { accepted: false, walk: true, counter: demand };
+    return { accepted: false, counter: demand };
+  }
+  // Meets or beats their ask (and length close enough) → accept.
+  if (wr >= 0.99 && offerYears >= demand.years - 1) return { accepted: true };
+  // Close on wages → probabilistic accept, better odds the closer you are.
+  if (wr >= 0.9) {
+    const chance = 0.35 + (wr - 0.9) * 5 - yearsOff * 0.08;
+    if (rand() < chance) return { accepted: true };
+  }
+  // Otherwise counter: player softens their demand toward your offer.
+  const counterWage = Math.max(offerWage + 1, Math.round(demand.wage * 0.68 + offerWage * 0.32));
+  const counterYears = offerYears > demand.years ? demand.years : (offerYears < demand.years - 1 ? demand.years - 1 : demand.years);
+  return { accepted: false, counter: { wage: Math.min(counterWage, demand.wage), years: counterYears } };
+}
+
+// Apply an agreed extension for one of the user's own players.
+function agreeExtension(pid, wage, years) {
   const p = state.players[pid];
   if (!p || p.tid !== state.userTid) return { ok: false, msg: "Not your player." };
-  if (p.years >= 4) return { ok: false, msg: "Contract already long-term." };
-  p.years = Math.min(5, p.years + ri(2, 3));
-  p.wage = Math.round(wageFor(p.ovr) * 1.12);
-  return { ok: true, msg: `${p.name} extends to ${p.years} years at £${p.wage}k/week.` };
+  p.wage = Math.max(5, Math.round(wage));
+  p.years = clamp(Math.round(years), 1, 6);
+  delete p.agitateFor;
+  p.listed = false;
+  addNews(`✍️ ${p.name} signs a new ${p.years}-year deal worth £${p.wage}k/week.`, p.tid);
+  return { ok: true, msg: `${p.name} agreed a ${p.years}-year contract at £${p.wage}k/week.` };
+}
+
+// Complete a transfer once personal terms are agreed. Handles fee + squad rules.
+function agreeSigning(pid, wage, years) {
+  const p = state.players[pid];
+  const user = teamById(state.userTid);
+  if (!p || p.retired || p.tid === state.userTid) return { ok: false, msg: "Unavailable." };
+  if (teamPlayers(state.userTid).length >= 32) return { ok: false, msg: "Squad is full (32 max)." };
+  const price = askingPrice(p);
+  if (price > user.budget) return { ok: false, msg: `Not enough budget (need £${price}m, have £${user.budget}m).` };
+  const seller = p.tid >= 0 ? teamById(p.tid) : null;
+  if (seller && teamPlayers(seller.tid).length <= 15) return { ok: false, msg: `${seller.name} refuse — their squad is too thin.` };
+  const wasFA = p.tid === -1;
+  transferPlayer(p, state.userTid, wasFA ? 0 : price, seller);
+  if (wasFA) user.budget = Math.round((user.budget - price) * 10) / 10;
+  p.wage = Math.max(5, Math.round(wage));
+  p.years = clamp(Math.round(years), 1, 6);
+  return { ok: true, msg: `${p.name} signs for ${user.name} on a ${p.years}-year deal!` };
 }
 
 function generateOffersForUser(onlyPid) {
@@ -1329,7 +1442,8 @@ const FGM = {
   standings, teamMatches, leaders, bestXI, teamRatings, leagueTeams, userLeague, leagueName, compName,
   teamById, teamPlayers, freeAgents, allActivePlayers, playablePlayers,
   playerValue, askingPrice, wageFor, subRatings, seasonLabel,
-  userBuy, userSell, rejectOffer, toggleListed, extendContract,
+  userBuy, userSell, rejectOffer, toggleListed,
+  contractDemand, evaluateContractOffer, agreeExtension, agreeSigning,
   addNews, teamName, teamAbbrev, clGroupTable, clParticipants,
   preHistory, honoursFor, clubNameByAbbrev,
   CUP_DEFS, cupParticipant,

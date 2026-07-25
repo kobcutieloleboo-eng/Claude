@@ -250,12 +250,13 @@ select, input[type=text], input[type=number] {
 }
 button, a, select { touch-action: manipulation; }
 
-/* ---------- v2.1: club picker, confirm step, smooth scrolling ---------- */
-html { scroll-behavior: smooth; }
+/* ---------- v2.1: club picker + native scrolling ---------- */
+/* No CSS scroll-behavior: smooth here — it animates every wheel/trackpad tick
+   and makes normal scrolling feel gritty/laggy. Native momentum scrolling only.
+   Programmatic jumps pass behavior:"smooth" explicitly in JS where wanted. */
 #content, #sidebar, .tbl-wrap, #modal {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  scroll-behavior: smooth;
 }
 
 .ng-wrap { max-width: 860px; margin: 0 auto; }
@@ -304,7 +305,6 @@ html { scroll-behavior: smooth; }
   .club-card { min-height: 64px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  html, #content, .tbl-wrap { scroll-behavior: auto; }
   .club-card, .toast { transition: none; }
 }
 
@@ -381,3 +381,38 @@ html { scroll-behavior: smooth; }
 .honours-detail { margin-top: 6px; }
 .honours-detail summary { cursor: pointer; color: var(--text-dim); font-size: 12.5px; }
 .honour-line { padding: 3px 0; font-size: 13px; border-bottom: 1px solid #1e2530; }
+
+/* ---------- v2.4: contract negotiation ---------- */
+.neg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+.neg-demand, .neg-offer { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.neg-demand h3, .neg-offer h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-dim); margin-bottom: 8px; }
+.neg-figure { font-size: 22px; font-weight: 800; }
+.neg-figure span { font-size: 12px; font-weight: 500; color: var(--text-dim); }
+.neg-figure.small { font-size: 16px; margin-top: 2px; }
+.neg-control { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.neg-control .neg-figure { flex: 1; text-align: center; }
+.neg-step { min-width: 40px; font-size: 18px; font-weight: 700; padding: 4px 0; }
+.neg-log { margin-top: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; max-height: 160px; overflow-y: auto; }
+.neg-line { padding: 4px 0; font-size: 13px; border-bottom: 1px solid #1e2530; }
+.neg-line:last-child { border-bottom: none; }
+.neg-you { color: var(--text); }
+.neg-them { color: #8fd4ff; }
+
+/* ---------- v2.4: live match viewer ---------- */
+.live-head { border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+.live-comp { text-align: center; font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+.live-score { display: flex; align-items: center; justify-content: center; gap: 14px; font-size: 16px; }
+.live-team { flex: 1; font-weight: 700; }
+.live-team.right { text-align: right; }
+.live-nums { background: var(--bg); border-radius: 8px; padding: 4px 16px; font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.live-clock { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.live-min { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 42px; color: var(--green); }
+.live-bar { flex: 1; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.live-fill { height: 100%; background: var(--green); border-radius: 3px; transition: width .12s linear; }
+.live-feed { max-height: 46vh; overflow-y: auto; }
+.live-line { padding: 6px 4px; font-size: 13.5px; border-bottom: 1px solid #1e2530; animation: liveIn .25s ease; }
+.live-line-min { display: inline-block; width: 38px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.live-goal { background: rgba(62,207,110,.07); }
+.live-ft { font-weight: 700; }
+@keyframes liveIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (max-width: 760px) { .neg-grid { grid-template-columns: 1fr; } }

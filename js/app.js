@@ -122,6 +122,23 @@ playDropdown.addEventListener("click", e => {
     return;
   }
   if (s.phase === "offseason") { toast("Season over — use “Continue to next season”."); return; }
+  if (act === "watch") {
+    const weekResults = FGM.simWeeks(1);
+    FGM.save();
+    const um = weekResults.length ? weekResults[0].find(m => (m.home === s.userTid || m.away === s.userTid) && m.events) : null;
+    if (um) {
+      playLiveMatch(um, () => {
+        resultToasts(weekResults);
+        if (FGM.state.phase === "offseason") toast("🏁 Season complete!", "toast-W", 5000);
+        render();
+      });
+    } else {
+      toast("No match for your club this week.", "toast-D");
+      resultToasts(weekResults);
+      render();
+    }
+    return;
+  }
   const n = act === "one" ? 1 : act === "month" ? 4 : FGM.WEEKS;
   const weekResults = FGM.simWeeks(n);
   FGM.save();
@@ -133,6 +150,72 @@ playDropdown.addEventListener("click", e => {
   if (FGM.state.phase === "offseason") toast("🏁 Season complete! Check News & History, then continue to next season.", "toast-W", 5000);
   render();
 });
+
+// ---------- Live match viewer ----------
+let liveTimer = null;
+function playLiveMatch(m, onDone) {
+  const h = FGM.teamById(m.home), a = FGM.teamById(m.away);
+  if (!h || !a) { onDone && onDone(); return; }
+  const events = (m.events || []).slice().sort((x, y) => x.min - y.min);
+  const total = 96;
+  let minute = 0, hg = 0, ag = 0, ei = 0, finished = false;
+  const compLabel = m.comp && m.comp !== FGM.userLeague() ? FGM.compName(m.comp) : FGM.leagueName(FGM.userLeague());
+
+  const paint = (feed) => {
+    openModal(`
+      <div class="live-head" style="background:linear-gradient(120deg, ${h.colors[0]}22, ${a.colors[0]}22)">
+        <div class="live-comp">${esc(compLabel)} · ${esc(h.stadium)}</div>
+        <div class="live-score">
+          <span class="live-team right">${teamDot(h)}${esc(h.name)}</span>
+          <span class="live-nums">${hg}–${ag}</span>
+          <span class="live-team">${esc(a.name)}${teamDot(a)}</span>
+        </div>
+        <div class="live-clock"><span class="live-min">${minute >= 90 ? "90+" : minute}'</span>
+          <div class="live-bar"><div class="live-fill" style="width:${Math.min(100, minute / 90 * 100)}%"></div></div></div>
+      </div>
+      <div class="live-feed">${feed}</div>
+      <div class="controls" style="margin-top:12px">
+        ${finished ? '<button class="btn btn-accent" data-live-close="1">Full time — continue</button>'
+                   : '<button class="btn" data-live-skip="1">Skip to result ⏭</button>'}
+      </div>`);
+    const skip = document.querySelector("[data-live-skip]");
+    if (skip) skip.addEventListener("click", finish);
+    const close = document.querySelector("[data-live-close]");
+    if (close) close.addEventListener("click", () => { closeModal(); onDone && onDone(); });
+  };
+
+  const feedLines = [];
+  const kickoff = `<div class="live-line"><span class="live-line-min">0'</span> 🟢 Kick-off at ${esc(h.stadium)}!</div>`;
+  feedLines.push(kickoff);
+  paint(feedLines.join(""));
+
+  function finish() {
+    if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+    // reveal remaining events instantly
+    while (ei < events.length) { addEvent(events[ei]); ei++; }
+    hg = m.hg; ag = m.ag;
+    minute = 90;
+    finished = true;
+    feedLines.push(`<div class="live-line live-ft"><span class="live-line-min">FT</span> 🏁 Full time: ${esc(h.name)} ${hg}–${ag} ${esc(a.name)}${m.pens ? ` · ${esc(FGM.teamName(m.winner))} win on penalties` : ""}</div>`);
+    paint(feedLines.join(""));
+  }
+
+  function addEvent(ev) {
+    const team = FGM.teamById(ev.tid);
+    if (ev.tid === m.home) hg++; else ag++;
+    feedLines.push(`<div class="live-line live-goal"><span class="live-line-min">${ev.min}'</span> ⚽ <strong>${esc(ev.name)}</strong> (${team ? esc(team.abbrev) : ""})${esc(ev.text || "")} — ${hg}–${ag}</div>`);
+  }
+
+  liveTimer = setInterval(() => {
+    minute += 2;
+    let changed = false;
+    while (ei < events.length && events[ei].min <= minute) { addEvent(events[ei]); ei++; changed = true; }
+    if (minute === 46) { feedLines.push(`<div class="live-line"><span class="live-line-min">HT</span> ⏸ Half time.</div>`); changed = true; }
+    if (minute >= total) { finish(); return; }
+    if (changed || minute % 6 === 0) paint(feedLines.join(""));
+    else { const mn = document.querySelector(".live-min"); const bar = document.querySelector(".live-fill"); if (mn) mn.textContent = (minute >= 90 ? "90+" : minute) + "'"; if (bar) bar.style.width = Math.min(100, minute / 90 * 100) + "%"; }
+  }, 130);
+}
 
 // ---------- Router ----------
 function navigate() {
@@ -761,7 +844,7 @@ document.addEventListener("click", e => {
     return;
   }
   const buy = e.target.closest("[data-buy]");
-  if (buy) { const r = FGM.userBuy(parseInt(buy.dataset.buy, 10)); toast(r.msg, r.ok ? "toast-W" : "toast-L"); FGM.save(); render(); return; }
+  if (buy) { openNegotiation(parseInt(buy.dataset.buy, 10), "sign"); return; }
   const acc = e.target.closest("[data-accept]");
   if (acc) { const r = FGM.userSell(parseInt(acc.dataset.accept, 10)); toast(r.msg, r.ok ? "toast-W" : "toast-L"); FGM.save(); render(); return; }
   const rej = e.target.closest("[data-reject]");
@@ -770,11 +853,124 @@ document.addEventListener("click", e => {
   if (act) {
     const pid = parseInt(act.dataset.pid, 10);
     if (act.dataset.act === "list") { FGM.toggleListed(pid); FGM.save(); showPlayerModal(pid); }
-    else if (act.dataset.act === "extend") { const r = FGM.extendContract(pid); toast(r.msg, r.ok ? "toast-W" : "toast-L"); FGM.save(); showPlayerModal(pid); }
-    else if (act.dataset.act === "buy") { const r = FGM.userBuy(pid); toast(r.msg, r.ok ? "toast-W" : "toast-L"); FGM.save(); closeModal(); render(); }
+    else if (act.dataset.act === "extend") { openNegotiation(pid, "extend"); }
+    else if (act.dataset.act === "buy") { openNegotiation(pid, "sign"); }
     return;
   }
 });
+
+// ---------- Contract negotiation modal ----------
+function openNegotiation(pid, context) {
+  const p = FGM.state.players[pid];
+  if (!p) return;
+  // Pre-checks for signings (fee / budget / squad) before wasting the player's time.
+  if (context === "sign") {
+    const user = FGM.teamById(FGM.state.userTid);
+    const price = FGM.askingPrice(p);
+    if (FGM.teamPlayers(FGM.state.userTid).length >= 32) { toast("Squad is full (32 max).", "toast-L"); return; }
+    if (price > user.budget) { toast(`Can't afford the £${price}m fee (budget ${money(user.budget)}).`, "toast-L"); return; }
+    const seller = p.tid >= 0 ? FGM.teamById(p.tid) : null;
+    if (seller && FGM.teamPlayers(seller.tid).length <= 15) { toast(`${seller.name} won't sell — squad too thin.`, "toast-L"); return; }
+  }
+  const demand = FGM.contractDemand(p, context);
+  // Negotiation state lives here in the UI; engine just judges each offer.
+  const neg = { pid, context, round: 1, maxRounds: 4, demand, offerWage: Math.round(demand.wage * 0.9), offerYears: demand.years, log: [], done: false };
+  renderNegotiation(neg);
+}
+
+function renderNegotiation(neg) {
+  const p = FGM.state.players[neg.pid];
+  const price = neg.context === "sign" ? FGM.askingPrice(p) : 0;
+  const club = p.tid >= 0 ? FGM.teamById(p.tid) : null;
+  const wageStep = p.ovr >= 80 ? 10 : 5;
+  const logHtml = neg.log.map(l => `<div class="neg-line neg-${l.who}">${l.who === "you" ? "🧑‍💼 You" : "🗣️ " + esc(p.name)}: ${esc(l.text)}</div>`).join("");
+  const bodyTop = neg.context === "sign"
+    ? `<p class="sub">Transfer fee <span class="money">${money(price)}</span>${club ? ` to ${esc(club.name)}` : " (free agent)"} — agreed. Now settle personal terms.</p>`
+    : `<p class="sub">Contract renewal · current deal £${p.wage}k/week, ${p.years} yr${p.years === 1 ? "" : "s"} left.</p>`;
+
+  openModal(`
+    <h1>${neg.context === "sign" ? "Sign" : "Renew"} ${esc(p.name)}</h1>
+    ${bodyTop}
+    <div class="neg-grid">
+      <div class="neg-demand">
+        <h3>Player wants</h3>
+        <div class="neg-figure">£${neg.demand.wage}k<span>/week</span></div>
+        <div class="neg-figure small">${neg.demand.years} year${neg.demand.years === 1 ? "" : "s"}</div>
+      </div>
+      <div class="neg-offer">
+        <h3>Your offer</h3>
+        <div class="neg-control">
+          <button class="btn neg-step" data-neg-wage="-1">−</button>
+          <div class="neg-figure">£${neg.offerWage}k<span>/week</span></div>
+          <button class="btn neg-step" data-neg-wage="1">+</button>
+        </div>
+        <div class="neg-control">
+          <button class="btn neg-step" data-neg-years="-1">−</button>
+          <div class="neg-figure small">${neg.offerYears} year${neg.offerYears === 1 ? "" : "s"}</div>
+          <button class="btn neg-step" data-neg-years="1">+</button>
+        </div>
+      </div>
+    </div>
+    ${logHtml ? `<div class="neg-log">${logHtml}</div>` : ""}
+    <div class="controls" style="margin-top:14px">
+      <button class="btn btn-accent" data-neg-submit="1" ${neg.done ? "disabled" : ""}>Make offer (round ${neg.round}/${neg.maxRounds})</button>
+      <button class="btn" data-neg-meet="1" ${neg.done ? "disabled" : ""}>Meet their demand</button>
+      <button class="btn" data-neg-cancel="1">Walk away</button>
+    </div>
+    <p class="mute" style="margin-top:6px">Higher wages hit your season finances; lowball too hard and they'll walk.</p>`);
+
+  document.querySelectorAll("[data-neg-wage]").forEach(b => b.addEventListener("click", () => {
+    neg.offerWage = Math.max(5, neg.offerWage + parseInt(b.dataset.negWage, 10) * wageStep);
+    renderNegotiation(neg);
+  }));
+  document.querySelectorAll("[data-neg-years]").forEach(b => b.addEventListener("click", () => {
+    neg.offerYears = clampN(neg.offerYears + parseInt(b.dataset.negYears, 10), 1, 6);
+    renderNegotiation(neg);
+  }));
+  const meet = document.querySelector("[data-neg-meet]");
+  if (meet) meet.addEventListener("click", () => { neg.offerWage = neg.demand.wage; neg.offerYears = neg.demand.years; submitOffer(neg); });
+  document.querySelector("[data-neg-submit]").addEventListener("click", () => submitOffer(neg));
+  document.querySelector("[data-neg-cancel]").addEventListener("click", () => { closeModal(); if (neg.context === "extend") showPlayerModal(neg.pid); });
+}
+
+function clampN(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function submitOffer(neg) {
+  const p = FGM.state.players[neg.pid];
+  neg.log.push({ who: "you", text: `£${neg.offerWage}k/week over ${neg.offerYears} year${neg.offerYears === 1 ? "" : "s"}.` });
+  const res = FGM.evaluateContractOffer(p, neg.demand, neg.offerWage, neg.offerYears, neg.round);
+  if (res.accepted) {
+    const r = neg.context === "sign"
+      ? FGM.agreeSigning(neg.pid, neg.offerWage, neg.offerYears)
+      : FGM.agreeExtension(neg.pid, neg.offerWage, neg.offerYears);
+    FGM.save();
+    closeModal();
+    toast(r.msg, r.ok ? "toast-W" : "toast-L", 4200);
+    render();
+    return;
+  }
+  if (res.walk) {
+    neg.log.push({ who: "them", text: "That's an insult. These talks are over." });
+    neg.done = true;
+    renderNegotiation(neg);
+    toast(`${p.name} walked away from negotiations.`, "toast-L");
+    return;
+  }
+  // Counter-offer: adopt softened demand, advance round.
+  neg.demand = res.counter;
+  neg.offerWage = Math.max(neg.offerWage, Math.round(res.counter.wage * 0.95));
+  neg.offerYears = res.counter.years;
+  neg.round++;
+  neg.log.push({ who: "them", text: `Closer... I'd take £${res.counter.wage}k/week over ${res.counter.years} years.` });
+  if (neg.round > neg.maxRounds) {
+    neg.done = true;
+    neg.log.push({ who: "them", text: "We're going in circles. I'm done here." });
+    renderNegotiation(neg);
+    toast("Negotiations broke down.", "toast-L");
+    return;
+  }
+  renderNegotiation(neg);
+}
 
 // ---------- New game flow ----------
 let ngSeason = 2025, ngLeague = "EPL", ngPick = null;
