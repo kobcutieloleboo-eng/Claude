@@ -4,7 +4,7 @@
 
 /* global START_SEASON, REAL_TEAMS, PROMOTION_POOL, NAME_POOLS, randomNationality, randomName,
    LALIGA_TEAMS, LALIGA_POOL, SERIEA_TEAMS, SERIEA_POOL, BUNDES_TEAMS, BUNDES_POOL,
-   LIGUE1_TEAMS, LIGUE1_POOL, FOREIGN_CLUBS, LEGENDS, STINT_OVERRIDES, PRE_AWARDS */
+   LIGUE1_TEAMS, LIGUE1_POOL, FOREIGN_CLUBS, LEGENDS, STINT_OVERRIDES, PRE_AWARDS, INTL_WINNERS */
 
 (function (root) {
 "use strict";
@@ -142,7 +142,7 @@ function makePlayer(name, pos, age, ovr, pot, natl, tid, opts) {
     pid: newPid(), name, pos, age, natl, ovr, pot: Math.max(pot, ovr), tid,
     wage: wageFor(ovr), years: opts.years || ri(1, 4),
     listed: false, injury: 0, youth: !!opts.youth, retired: false,
-    stats: blankStats(), career: [],
+    stats: blankStats(), career: [], trophies: [],
   };
 }
 function blankStats() { return { apps: 0, goals: 0, assists: 0, cs: 0 }; }
@@ -260,7 +260,7 @@ function newLeague(startSeason, userLeagueId, userClubAbbrev) {
     version: 2, season: startSeason, startSeason, week: 0, phase: "season",
     userTid: -1, nextPid: 1, nextTid: 0,
     teams: [], players: {}, leagues: {}, news: [], history: [], offers: [],
-    futureDebuts: [], futureMoves: [], cl: null,
+    futureDebuts: [], futureMoves: [], cl: null, internationals: [],
   };
   // Teams
   for (const def of LEAGUE_DEFS) {
@@ -567,6 +567,102 @@ function cupParticipant(cupId, tid) {
   return cup.rounds.some(r => r.matches.some(m => m.home === tid || m.away === tid));
 }
 
+// ---------- International tournaments ----------
+const CONFED = {
+  EU: new Set(["England", "Scotland", "Wales", "Ireland", "France", "Spain", "Germany", "Netherlands",
+    "Portugal", "Italy", "Belgium", "Denmark", "Sweden", "Norway", "Serbia", "Croatia", "Poland",
+    "Switzerland", "Austria", "Ukraine", "Czech Republic", "Turkey", "Greece", "Slovakia", "Slovenia",
+    "Hungary", "Romania", "Bulgaria", "Iceland", "Finland", "Albania", "Georgia", "Armenia"]),
+  SA: new Set(["Brazil", "Argentina", "Uruguay", "Colombia", "Chile", "Paraguay", "Ecuador", "Peru",
+    "Venezuela", "Bolivia"]),
+};
+
+// The tournament held in the summer AFTER `season` (calendar year season+1):
+// World Cup / Euros on a 4-year cadence, Copa América filling other years.
+function tournamentFor(season) {
+  const year = season + 1;
+  if (year % 4 === 2) return { comp: "World Cup", scope: "WORLD", year, teams: 16 };
+  if (year % 4 === 0) return { comp: "Euros", scope: "EU", year, teams: 8 };
+  return { comp: "Copa América", scope: "SA", year, teams: 8 };
+}
+
+// Build a nation's squad (up to 23 by rating) from every active player.
+function nationSquad(natl) {
+  return allActivePlayers().filter(p => p.natl === natl).sort((a, b) => b.ovr - a.ovr).slice(0, 23);
+}
+function nationStrength(squad) {
+  const top = squad.slice(0, 11);
+  return top.length >= 8 ? top.reduce((s, p) => s + p.ovr, 0) / top.length : 0;
+}
+
+function simInternational() {
+  const t = tournamentFor(state.season);
+  // Eligible nations for this tournament's scope with a deep enough pool.
+  const nats = {};
+  for (const p of allActivePlayers()) {
+    if (t.scope !== "WORLD" && !CONFED[t.scope].has(p.natl)) continue;
+    (nats[p.natl] = nats[p.natl] || []).push(p);
+  }
+  const entrants = Object.keys(nats)
+    .map(n => ({ natl: n, squad: nationSquad(n) }))
+    .filter(x => x.squad.length >= 14)
+    .map(x => ({ ...x, str: nationStrength(x.squad) }))
+    .sort((a, b) => b.str - a.str)
+    .slice(0, t.teams);
+  if (entrants.length < 4) return null;
+
+  // Single-elimination knockout (bracket size = power of two ≤ entrants).
+  let size = 1; while (size * 2 <= entrants.length) size *= 2;
+  const field = entrants.slice(0, size);
+  const order = bracketSeedOrder(size);
+  let alive = order.map(seed => field[seed - 1]);
+  const rounds = [];
+  while (alive.length > 1) {
+    const next = [], matches = [];
+    for (let i = 0; i < alive.length; i += 2) {
+      const a = alive[i], b = alive[i + 1];
+      const la = clamp(1.3 * Math.exp((a.str - b.str) / 16), 0.2, 3.5);
+      const lb = clamp(1.3 * Math.exp((b.str - a.str) / 16), 0.2, 3.5);
+      let ga = poisson(la), gb = poisson(lb), pens = false, win;
+      if (ga === gb) { pens = true; win = rand() < 0.5 + (a.str - b.str) / 60 ? a : b; }
+      else win = ga > gb ? a : b;
+      matches.push({ a: a.natl, b: b.natl, ga, gb, pens, winner: win.natl });
+      next.push(win);
+    }
+    rounds.push(matches);
+    alive = next;
+  }
+  const champ = alive[0];
+  const finalRound = rounds[rounds.length - 1][0];
+  const runnerUp = finalRound.winner === finalRound.a ? finalRound.b : finalRound.a;
+  // Golden Ball: best player among the champion's squad.
+  const gb = champ.squad[0];
+
+  // Record trophies on the winning squad + a Golden Ball individual honour.
+  for (const p of champ.squad) {
+    p.trophies = p.trophies || [];
+    p.trophies.push({ season: state.season, comp: t.comp, kind: "intl" });
+  }
+  if (gb) { gb.trophies = gb.trophies || []; gb.trophies.push({ season: state.season, comp: `${t.comp} Golden Ball`, kind: "intl-award" }); }
+
+  const result = {
+    season: state.season, year: t.year, comp: t.comp, scope: t.scope,
+    winner: champ.natl, runnerUp,
+    goldenBall: gb ? { name: gb.name, abbrev: teamAbbrev(gb.tid), natl: gb.natl } : null,
+    squad: champ.squad.map(p => p.name),
+    rounds,
+  };
+  state.internationals = state.internationals || [];
+  state.internationals.push(result);
+  addNews(`🌍🏆 ${champ.natl} win the ${t.comp} ${t.year}! They beat ${runnerUp} in the final.${gb ? ` Golden Ball: ${gb.name}.` : ""}`);
+  const userNats = new Set(teamPlayers(state.userTid).map(p => p.natl));
+  if (userNats.has(champ.natl)) {
+    const winners = teamPlayers(state.userTid).filter(p => champ.squad.includes(p.name));
+    if (winners.length) addNews(`🎉 ${winners.map(p => p.name).join(", ")} return to your club as ${t.comp} winner${winners.length > 1 ? "s" : ""}!`, state.userTid);
+  }
+  return result;
+}
+
 // ---------- Accessors ----------
 function teamById(tid) { return state.teams.find(t => t.tid === tid); }
 function teamPlayers(tid) { return Object.values(state.players).filter(p => p.tid === tid && !p.retired); }
@@ -841,10 +937,22 @@ function concludeSeason() {
   pickBest(p => ["DM", "CM", "AM"].includes(p.pos), 3);
   pickBest(p => ["LW", "RW", "ST"].includes(p.pos), 3);
 
+  // Record club trophies on every winning squad, for player accolades.
+  const recordTrophy = (tid, comp) => {
+    for (const p of teamPlayers(tid)) { p.trophies = p.trophies || []; p.trophies.push({ season: state.season, comp, kind: "club" }); }
+  };
+  if (clW) recordTrophy(clW.tid, "Champions League");
+  for (const def of LEAGUE_DEFS) { const c = champions[def.id]; if (c) recordTrophy(c.tid, def.name); }
+  if (state.cups) for (const cup of Object.values(state.cups)) { if (cup.winner !== null) recordTrophy(cup.winner, cup.name); }
+
+  // Summer international tournament.
+  const intl = simInternational();
+
   const entry = {
     season: state.season,
     champions,
     clWinner: clW ? { name: clW.name, abbrev: clW.abbrev } : null,
+    international: intl ? { comp: intl.comp, year: intl.year, winner: intl.winner, runnerUp: intl.runnerUp, goldenBall: intl.goldenBall } : null,
     tables: Object.fromEntries(LEAGUE_DEFS.map(d => [d.id, state.leagues[d.id].lastTable.map(r => ({ pos: r.pos, name: r.name, pts: r.pts, w: r.w, d: r.d, l: r.l, gd: r.gd }))])),
     goldenBoot: boot ? award(boot, boot.stats.goals, "goals") : null,
     playmaker: play ? award(play, play.stats.assists, "assists") : null,
@@ -1444,30 +1552,83 @@ function preHistory() {
   return out.reverse();
 }
 
-// All honours for a player, real (pre-start) + earned in your save.
+// Cached lookups for reconstructing real players' pre-save trophies.
+let REAL_INDEX = null, CLUB_LEAGUE = null;
+function realIndex() {
+  if (!REAL_INDEX) { REAL_INDEX = {}; for (const rp of realPlayerDB()) REAL_INDEX[rp.name] = rp; }
+  return REAL_INDEX;
+}
+function clubLeague(abbrev) {
+  if (!CLUB_LEAGUE) {
+    CLUB_LEAGUE = {};
+    for (const def of LEAGUE_DEFS) for (const c of def.teams()) CLUB_LEAGUE[c.abbrev] = def.id;
+  }
+  return CLUB_LEAGUE[abbrev];
+}
+// Which club (abbrev) a real player was at during the season starting `year`.
+function clubInSeason(rp, year) {
+  let club = null;
+  for (const [y, ab] of rp.stints) { if (y <= year) club = ab; }
+  return club;
+}
+
+// All honours for a player: real pre-save awards + trophies, plus everything
+// earned in your save (individual awards, club trophies, international titles).
 function honoursFor(name) {
   const start = state.startSeason || state.season;
   const out = [];
-  for (const [y, w] of Object.entries(PRE_AWARDS.bdor)) {
-    if (+y <= start && w === name) out.push({ season: +y - 1, award: "Ballon d'Or", real: true });
+  const push = (season, award, opts) => out.push(Object.assign({ season, award }, opts));
+
+  // --- Real individual awards before the save ---
+  for (const [y, w] of Object.entries(PRE_AWARDS.bdor)) if (+y <= start && w === name) push(+y - 1, "Ballon d'Or", { real: true });
+  for (const [y, w] of Object.entries(PRE_AWARDS.boot)) if (+y <= start && w.split(" & ").includes(name)) push(+y - 1, "European Golden Boot", { real: true });
+
+  // --- Real trophies before the save (reconstructed from career stints) ---
+  const rp = realIndex()[name];
+  if (rp) {
+    for (let finalYear = 2000; finalYear <= start; finalYear++) {
+      const club = clubInSeason(rp, finalYear - 1);
+      if (!club) continue;
+      if (PRE_AWARDS.cl[finalYear] === club) push(finalYear - 1, "Champions League", { real: true, trophy: true });
+      const lg = clubLeague(club);
+      if (lg && PRE_AWARDS.champs[lg] && PRE_AWARDS.champs[lg][finalYear] === club) {
+        const def = LEAGUE_DEFS.find(d => d.id === lg);
+        push(finalYear - 1, `${def.name} title`, { real: true, trophy: true });
+      }
+    }
+    // Real international titles for genuine stars of the winning nation.
+    for (const w of INTL_WINNERS) {
+      if (w.year > start || w.winner !== rp.natl) continue;
+      const age = w.year - rp.birthYear;
+      if (age < 19 || age > 37) continue;
+      if (w.year < rp.stints[0][0] || w.year > rp.endYear + 2) continue;
+      if (ovrAtAge(rp.peak, age, rp.pos, rp.name) < 78) continue;
+      push(w.year - 1, `${w.comp} (${w.winner})`, { real: true, intl: true });
+    }
   }
-  for (const [y, w] of Object.entries(PRE_AWARDS.boot)) {
-    if (+y <= start && w.split(" & ").includes(name)) out.push({ season: +y - 1, award: "European Golden Boot", real: true });
-  }
+
+  // --- Everything won in your save ---
   for (const h of state.history) {
-    if (h.bdor && h.bdor[0] && h.bdor[0].name === name) out.push({ season: h.season, award: "Ballon d'Or" });
-    if (h.goldenBoot && h.goldenBoot.name === name) out.push({ season: h.season, award: "European Golden Boot" });
-    if (h.worldXI && h.worldXI.some(w => w.name === name)) out.push({ season: h.season, award: "FIFPRO World XI" });
-    if (h.playmaker && h.playmaker.name === name) out.push({ season: h.season, award: "Playmaker of the Season" });
-    if (h.goldenGlove && h.goldenGlove.name === name) out.push({ season: h.season, award: "Yashin Trophy" });
-    if (h.ypoty && h.ypoty.name === name) out.push({ season: h.season, award: "Golden Boy" });
+    if (h.bdor && h.bdor[0] && h.bdor[0].name === name) push(h.season, "Ballon d'Or");
+    if (h.goldenBoot && h.goldenBoot.name === name) push(h.season, "European Golden Boot");
+    if (h.worldXI && h.worldXI.some(w => w.name === name)) push(h.season, "FIFPRO World XI");
+    if (h.playmaker && h.playmaker.name === name) push(h.season, "Playmaker of the Season");
+    if (h.goldenGlove && h.goldenGlove.name === name) push(h.season, "Yashin Trophy");
+    if (h.ypoty && h.ypoty.name === name) push(h.season, "Golden Boy");
     if (h.leagueAwards) {
       for (const def of LEAGUE_DEFS) {
         const la = h.leagueAwards[def.id];
         if (!la) continue;
-        if (la.boot && la.boot.name === name) out.push({ season: h.season, award: `${def.name} Golden Boot` });
-        if (la.poty && la.poty.name === name) out.push({ season: h.season, award: `${def.name} Player of the Season` });
+        if (la.boot && la.boot.name === name) push(h.season, `${def.name} Golden Boot`);
+        if (la.poty && la.poty.name === name) push(h.season, `${def.name} Player of the Season`);
       }
+    }
+  }
+  // Trophies recorded directly on the live player object (club + international).
+  const live = Object.values(state.players).find(p => p.name === name);
+  if (live && live.trophies) {
+    for (const tr of live.trophies) {
+      push(tr.season, tr.comp, tr.kind === "club" ? { trophy: true } : (tr.kind === "intl-award" ? {} : { intl: true }));
     }
   }
   out.sort((a, b) => a.season - b.season);
@@ -1521,7 +1682,8 @@ const FGM = {
   contractDemand, evaluateContractOffer, agreeExtension, agreeSigning,
   addNews, teamName, teamAbbrev, clGroupTable, clParticipants,
   preHistory, honoursFor, clubNameByAbbrev,
-  CUP_DEFS, cupParticipant,
+  CUP_DEFS, cupParticipant, INTL_WINNERS,
+  internationals() { return state.internationals || []; },
   userCups() { const t = teamById(state.userTid); return state.cups ? Object.values(state.cups).filter(c => c.league === (t ? t.league : "")) : []; },
   POS_GROUP,
   setUserTid(tid) { state.userTid = tid; },

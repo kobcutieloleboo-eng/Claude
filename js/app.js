@@ -644,8 +644,10 @@ function viewHistory() {
     const cupsHtml = (h.cups && h.cups.length)
       ? `<div class="worldxi"><strong>🏆 Domestic cup winners</strong><div class="worldxi-chips">${h.cups.map(c => `<span class="xi-chip">${esc(c.name)}: <strong>${esc(c.winner)}</strong></span>`).join("")}</div></div>`
       : "";
+    const intlLine = h.international ? `<p class="mute" style="margin:2px 0 8px">🌍 ${esc(h.international.comp)} ${h.international.year}: <strong>${esc(h.international.winner)}</strong></p>` : "";
     return `<div class="card">
       <h3>${FGM.seasonLabel(h.season)}${h.clWinner ? ` — 🏆⭐ ${esc(h.clWinner.name)} won the Champions League` : ""}</h3>
+      ${intlLine}
       ${podium}
       <div class="flex">
         <div><strong>League champions</strong><div class="tbl-wrap"><table><tbody>${champs}</tbody></table></div>
@@ -671,8 +673,23 @@ function viewHistory() {
     <div class="tbl-wrap"><table>
       <thead><tr><th>Season</th><th>🏅 Ballon d'Or</th><th>👟 Golden Boot</th><th>Champions League</th><th>England</th><th>Spain</th><th>Italy</th><th>Germany</th><th>France</th></tr></thead>
       <tbody>${preRows}</tbody></table></div>` : "";
+
+  // International tournaments: in-game results + the real pre-save winners.
+  const start = FGM.state.startSeason || FGM.state.season;
+  const gameIntl = FGM.internationals().slice().reverse()
+    .map(t => `<tr><td>${t.year}</td><td>${esc(t.comp)}</td><td>🏆 <strong>${esc(t.winner)}</strong></td><td class="mute">${esc(t.runnerUp)}</td><td>${t.goldenBall ? esc(t.goldenBall.name) : "—"}</td></tr>`).join("");
+  const realIntl = FGM.INTL_WINNERS.filter(w => w.year <= start).slice().reverse()
+    .map(w => `<tr><td>${w.year}</td><td>${esc(w.comp)}</td><td>🏆 <strong>${esc(w.winner)}</strong></td><td class="mute">—</td><td class="mute">real</td></tr>`).join("");
+  const intlBlock = `
+    <h2>🌍 International tournaments</h2>
+    <p class="sub">World Cup, Euros &amp; Copa América — your save's results plus the real pre-save winners.</p>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Year</th><th>Tournament</th><th>Winner</th><th>Runner-up</th><th>Golden Ball</th></tr></thead>
+      <tbody>${gameIntl}${realIntl}</tbody></table></div>`;
+
   content.innerHTML = `<h1>History</h1>
     ${s.history.length ? `<div class="cards" style="flex-direction:column">${blocks}</div>` : "<p class='mute'>No completed seasons in your save yet — your first Ballon d'Or night comes at the end of this season.</p>"}
+    ${intlBlock}
     ${preBlock}`;
 }
 
@@ -732,11 +749,19 @@ function viewSeasonReview() {
   const cups = (h.cups && h.cups.length)
     ? `<div class="worldxi-chips">${h.cups.map(c => `<span class="xi-chip">${esc(c.name)}: <strong>${esc(c.winner)}</strong></span>`).join("")}</div>`
     : "<p class='mute'>—</p>";
+  const intlCard = h.international
+    ? `<div class="card" style="border-color:var(--accent)"><h3>🌍 ${esc(h.international.comp)} ${h.international.year}</h3>
+        <p class="big">🏆 ${esc(h.international.winner)}</p>
+        <p class="mute">Beat ${esc(h.international.runnerUp)} in the final${h.international.goldenBall ? ` · Golden Ball: <span class="player-search" data-name="${esc(h.international.goldenBall.name)}">${esc(h.international.goldenBall.name)}</span> (${esc(h.international.goldenBall.natl)})` : ""}</p></div>`
+    : "";
 
   content.innerHTML = `
     <h1>🏅 ${FGM.seasonLabel(h.season)} Season Review</h1>
     <p class="sub">The full end-of-season ceremony. Your finish: <strong>${h.userPos}${ord(h.userPos)}</strong> in the ${esc(FGM.leagueName(h.userLeague))} with ${esc(h.userTeam)}.${h.clWinner ? ` · 🏆⭐ ${esc(h.clWinner.name)} won the Champions League.` : ""}</p>
-    <div class="card" style="border-color:var(--gold)"><h3>🏅 Ballon d'Or</h3>${podium || "<p class='mute'>—</p>"}</div>
+    <div class="cards">
+      <div class="card" style="border-color:var(--gold)"><h3>🏅 Ballon d'Or</h3>${podium || "<p class='mute'>—</p>"}</div>
+      ${intlCard}
+    </div>
     <h2>League champions</h2>
     <div class="review-champs">${champCards}</div>
     <h2>Golden Boots &amp; Players of the Season — every league</h2>
@@ -902,15 +927,28 @@ function showPlayerModal(pid) {
     ${p.retired ? "" : "<p class='mute' style='margin-top:6px'>* current season in progress</p>"}`);
 }
 
+function honourIcon(a, h) {
+  if (h && h.intl) return a.includes("World Cup") ? "🌐" : "🌎";
+  if (h && h.trophy) return a.includes("Champions League") ? "🏆⭐" : "🏆";
+  return a.startsWith("Ballon") ? "🏅" : a.includes("Boot") ? "👟" : a.includes("World XI") ? "🌍"
+    : a.includes("Yashin") ? "🧤" : a.includes("Golden Boy") ? "🌟" : a.includes("Golden Ball") ? "⚽" : "🎯";
+}
 function honoursHtml(p) {
   const hon = FGM.honoursFor(p.name);
   if (!hon.length) return "";
-  const icon = a => a.startsWith("Ballon") ? "🏅" : a.includes("Boot") ? "👟" : a.includes("World XI") ? "🌍" : a.includes("Yashin") ? "🧤" : a.includes("Golden Boy") ? "🌟" : "🎯";
-  const counts = {};
-  for (const h of hon) counts[h.award] = (counts[h.award] || 0) + 1;
-  const summary = Object.entries(counts).map(([a, n]) => `<span class="badge badge-gold">${icon(a)} ${n > 1 ? n + "× " : ""}${esc(a)}</span>`).join(" ");
-  const rows = hon.slice().reverse().map(h => `<div class="honour-line"><span class="mute">${FGM.seasonLabel(h.season)}</span> ${icon(h.award)} ${esc(h.award)}${h.real ? " <span class='mute'>(real)</span>" : ""}</div>`).join("");
-  return `<h2>Honours</h2><div class="honours-wrap">${summary}<details class="honours-detail"><summary>Full list (${hon.length})</summary>${rows}</details></div>`;
+  // Split into trophies (club + international) and individual awards.
+  const trophies = hon.filter(h => h.trophy || h.intl);
+  const awards = hon.filter(h => !h.trophy && !h.intl);
+  const summarize = list => {
+    const counts = {};
+    for (const h of list) { const k = h.award; (counts[k] = counts[k] || { n: 0, h }); counts[k].n++; }
+    return Object.entries(counts).map(([a, v]) => `<span class="badge badge-gold">${honourIcon(a, v.h)} ${v.n > 1 ? v.n + "× " : ""}${esc(a)}</span>`).join(" ");
+  };
+  const rows = hon.slice().reverse().map(h => `<div class="honour-line"><span class="mute">${FGM.seasonLabel(h.season)}</span> ${honourIcon(h.award, h)} ${esc(h.award)}${h.real ? " <span class='mute'>(pre-save)</span>" : ""}</div>`).join("");
+  return `<h2>Honours <span class="mute" style="font-weight:400;font-size:13px">· ${hon.length}</span></h2>
+    ${trophies.length ? `<div class="honours-wrap"><div class="mute" style="font-size:12px;margin-bottom:4px">TROPHIES</div>${summarize(trophies)}</div>` : ""}
+    ${awards.length ? `<div class="honours-wrap"><div class="mute" style="font-size:12px;margin:8px 0 4px">INDIVIDUAL AWARDS</div>${summarize(awards)}</div>` : ""}
+    <details class="honours-detail"><summary>Season-by-season list</summary>${rows}</details>`;
 }
 
 // ---------- Team modal ----------

@@ -26,8 +26,16 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 - 32 teams: top four from each playable league plus Europe's best non-playable clubs
 - Real format feel: 8 groups of 4 played midweek between league rounds, then R16 → final (single-leg knockouts), with prize money, news, and history
 
+**International tournaments**
+- A **World Cup, Euros or Copa América every summer** on a real 4-year cadence, contested by national teams built from your world's players; single-elim knockout with a winner, runner-up and Golden Ball
+- Real past winners are pre-filled (World Cups 2002–2022, Euros, Copa América) so icons carry their real international titles
+
+**Trophies in every player's cabinet**
+- Player profiles now separate **Trophies** (Champions Leagues, league titles, domestic cups, World Cups & continental titles) from **Individual awards** — real ones won before your save *and* every trophy won in your game
+- Reconstructed from real career histories: 2025 Messi shows 10 La Liga titles, 4 Champions Leagues, a World Cup and 2 Ligue 1 titles; Iniesta his Euros + World Cup, and so on
+
 **Accolades & the record books**
-- A dedicated **Season Review** page: the full year-end ceremony in one place — Ballon d'Or podium, all five league champions, a **Golden Boot and Player of the Season for every league**, global awards, cup winners and the FIFPRO World XI
+- A dedicated **Season Review** page: the full year-end ceremony in one place — Ballon d'Or podium, the summer international tournament, all five league champions, a **Golden Boot and Player of the Season for every league**, global awards, cup winners and the FIFPRO World XI
 - End-of-season **Ballon d'Or** (with a three-man podium), **FIFPRO World XI**, per-league **Golden Boots** & **Players of the Season**, **European Golden Boot**, **Yashin Trophy** (best keeper), **Golden Boy** (best U21) and Playmaker award
 - Real historical honours pre-filled: every real Ballon d'Or, Golden Boot, Champions League winner and league champion from 2000 up to your start season, shown in a "record books" table
 - Every player's profile lists their honours (real ones earned before your save, plus any they win in your world)

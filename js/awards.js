@@ -42,4 +42,32 @@ const PRE_AWARDS = {
   },
 };
 
-if (typeof module !== "undefined") module.exports = { PRE_AWARDS };
+// Real international tournament winners (year the final was played, nation).
+// Used to give real players past international honours before the save starts,
+// and to seed the internationals record book.
+const INTL_WINNERS = [
+  { year: 2000, comp: "Euros", scope: "EU", winner: "France" },
+  { year: 2001, comp: "Copa América", scope: "SA", winner: "Colombia" },
+  { year: 2002, comp: "World Cup", scope: "WORLD", winner: "Brazil" },
+  { year: 2004, comp: "Euros", scope: "EU", winner: "Greece" },
+  { year: 2004, comp: "Copa América", scope: "SA", winner: "Brazil" },
+  { year: 2006, comp: "World Cup", scope: "WORLD", winner: "Italy" },
+  { year: 2007, comp: "Copa América", scope: "SA", winner: "Brazil" },
+  { year: 2008, comp: "Euros", scope: "EU", winner: "Spain" },
+  { year: 2010, comp: "World Cup", scope: "WORLD", winner: "Spain" },
+  { year: 2011, comp: "Copa América", scope: "SA", winner: "Uruguay" },
+  { year: 2012, comp: "Euros", scope: "EU", winner: "Spain" },
+  { year: 2014, comp: "World Cup", scope: "WORLD", winner: "Germany" },
+  { year: 2015, comp: "Copa América", scope: "SA", winner: "Chile" },
+  { year: 2016, comp: "Euros", scope: "EU", winner: "Portugal" },
+  { year: 2016, comp: "Copa América", scope: "SA", winner: "Chile" },
+  { year: 2018, comp: "World Cup", scope: "WORLD", winner: "France" },
+  { year: 2019, comp: "Copa América", scope: "SA", winner: "Brazil" },
+  { year: 2021, comp: "Euros", scope: "EU", winner: "Italy" },
+  { year: 2021, comp: "Copa América", scope: "SA", winner: "Argentina" },
+  { year: 2022, comp: "World Cup", scope: "WORLD", winner: "Argentina" },
+  { year: 2024, comp: "Euros", scope: "EU", winner: "Spain" },
+  { year: 2024, comp: "Copa América", scope: "SA", winner: "Argentina" },
+];
+
+if (typeof module !== "undefined") module.exports = { PRE_AWARDS, INTL_WINNERS };
