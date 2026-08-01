@@ -735,15 +735,19 @@ function simMatch(m) {
   return m;
 }
 
-const SCORE_W = { GK: 0.01, CB: 0.9, RB: 0.5, LB: 0.5, DM: 1.1, CM: 2.6, AM: 4.5, LW: 5.5, RW: 5.5, ST: 9 };
-const ASSIST_W = { GK: 0.05, CB: 0.6, RB: 1.6, LB: 1.6, DM: 1.6, CM: 3.2, AM: 5.5, LW: 4.8, RW: 4.8, ST: 3 };
+// Positional scoring propensity — wide forwards score nearly like strikers
+// (elite wingers are goal machines IRL), midfield/defence much less.
+const SCORE_W = { GK: 0.004, CB: 0.35, RB: 0.28, LB: 0.28, DM: 0.5, CM: 1.6, AM: 4.2, LW: 7.2, RW: 7.2, ST: 10 };
+const ASSIST_W = { GK: 0.05, CB: 0.6, RB: 1.8, LB: 1.8, DM: 1.7, CM: 3.4, AM: 6, LW: 5.2, RW: 5.2, ST: 3 };
 
-function weightedPick(xi, weights) {
+// Goals concentrate heavily on the best players: a steep rating curve means a
+// 91-rated forward vastly outshoots a 77-rated one, so scrubs don't top-score.
+function weightedPick(xi, weights, exp) {
   let total = 0;
   const opts = [];
   for (const s of xi) {
     if (!s.player) continue;
-    const w = (weights[s.slot] || 1) * Math.pow(s.player.ovr / 72, 2.5);
+    const w = (weights[s.slot] || 1) * Math.pow(1.135, s.player.ovr - 70) * (exp === undefined ? 1 : exp(s.player));
     opts.push([s.player, w]); total += w;
   }
   if (!total) return null;
