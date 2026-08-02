@@ -48,6 +48,12 @@ for (let i = 0; i < seasons; i++) {
   const gf = FGM.standings("EPL").reduce((sum, r) => sum + r.gf, 0);
   check(gf / 380 > 2.0 && gf / 380 < 3.6, `EPL goals/match realistic (${(gf / 380).toFixed(2)})`);
   check(s.cl && s.cl.winner !== null, "CL has a winner");
+  check(s.el && s.el.winner !== null, "Europa League has a winner");
+  check(FGM.elParticipants().length === 32, "32 Europa League participants");
+  check(FGM.clParticipants().filter(t => FGM.elParticipants().includes(t)).length === 0, "no club is in both CL and EL");
+  const lastH = s.history[s.history.length - 1];
+  check(lastH.clBoot && lastH.clBoot.value > 0, "CL Golden Boot recorded");
+  check(lastH.elBoot && lastH.elBoot.value > 0, "EL Golden Boot recorded");
   // Domestic cups: all 6 resolve to a winner every season
   const cupHist = s.history[s.history.length - 1].cups;
   check(cupHist && cupHist.length === 6, `all 6 domestic cups completed (${cupHist ? cupHist.length : 0})`);
@@ -60,6 +66,7 @@ for (let i = 0; i < seasons; i++) {
   check(FGM.leagueTeams("EPL").length === 20 && FGM.leagueTeams("BL").length === 18, "league sizes stable after pro/rel");
   check(s.teams.some(t => t.tid === s.userTid), "user team still in league");
   check(FGM.clParticipants().length === 32, "next CL drawn");
+  check(FGM.elParticipants().length === 32, "next EL drawn");
 }
 
 // Transfers + persistence

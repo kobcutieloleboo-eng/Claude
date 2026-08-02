@@ -266,8 +266,8 @@ function viewDashboard() {
   const t = FGM.teamById(s.userTid);
   const ratings = FGM.teamRatings(s.userTid);
   const inCL = FGM.clParticipants().includes(s.userTid);
+  const inEL = FGM.elParticipants().includes(s.userTid);
 
-  const matches = FGM.teamMatches(s.userTid).filter(x => x.m.played || x.comp !== "UCL" || x.stage === undefined);
   const upcoming = FGM.teamMatches(s.userTid).filter(x => !x.m.played);
   const played = FGM.teamMatches(s.userTid).filter(x => x.m.played);
   played.sort((a, b) => 0); // schedule order is fine
@@ -277,7 +277,7 @@ function viewDashboard() {
   let nextHtml = "<p class='mute'>Season complete.</p>";
   if (next) {
     const h = FGM.teamById(next.m.home), a = FGM.teamById(next.m.away);
-    if (h && a) nextHtml = `<p>${next.comp === "UCL" ? "🏆 " : ""}${esc(FGM.compName(next.comp))}</p>
+    if (h && a) nextHtml = `<p>${next.comp === "UCL" ? "🏆 " : next.comp === "UEL" ? "🏅 " : ""}${esc(FGM.compName(next.comp))}</p>
       <p class="big">${teamLink(h)} vs ${teamLink(a)}</p><p class="mute">${esc(h.stadium)}</p>`;
   }
   let lastHtml = "<p class='mute'>No matches played yet.</p>";
@@ -298,7 +298,7 @@ function viewDashboard() {
   content.innerHTML = `
     <h1>${teamDot(t)} ${esc(t.name)}</h1>
     <p class="sub">${esc(FGM.leagueName(t.league))} · ${FGM.seasonLabel()} · <strong>${userRow.pos}${ord(userRow.pos)}</strong> · ${userRow.pts} pts ·
-      XI ${ovrSpan(Math.round(ratings.ovr))} · Form <span class="form-str">${form || "—"}</span>${inCL ? " · <span class='badge badge-gold'>UCL</span>" : ""}</p>
+      XI ${ovrSpan(Math.round(ratings.ovr))} · Form <span class="form-str">${form || "—"}</span>${inCL ? " · <span class='badge badge-gold'>UCL</span>" : inEL ? " · <span class='badge badge-gold'>UEL</span>" : ""}</p>
     <div class="cards">
       <div class="card"><h3>Next match</h3>${nextHtml}</div>
       <div class="card"><h3>Last result</h3>${lastHtml}</div>
@@ -448,13 +448,21 @@ function viewFixtures(args) {
   if (next) next.addEventListener("click", () => { location.hash = `#fixtures/${lid}/${round + 1}`; });
 }
 
-function viewEurope() {
+function viewEurope(args) {
   const s = FGM.state;
-  const cl = s.cl;
-  if (!cl) { content.innerHTML = "<h1>Champions League</h1><p class='mute'>No competition yet.</p>"; return; }
+  let sel = (args && args[0]) || "ucl";
+  if (sel !== "uel") sel = "ucl";
+  const cl = sel === "uel" ? s.el : s.cl;
+  const groupTable = sel === "uel" ? FGM.elGroupTable : FGM.clGroupTable;
+  const title = sel === "uel" ? "🏅 Europa League" : "🏆 Champions League";
+  const winTitle = sel === "uel" ? "🏆 Europa League winners" : "🏆⭐ Champions of Europe";
+  const tabs = `<div class="ltabs">
+    <a class="ltab ${sel === "ucl" ? "active" : ""}" href="#europe/ucl">Champions League</a>
+    <a class="ltab ${sel === "uel" ? "active" : ""}" href="#europe/uel">Europa League</a></div>`;
+  if (!cl) { content.innerHTML = `<h1>${title}</h1>${tabs}<p class='mute'>No competition yet.</p>`; return; }
   matchRegistry.length = 0;
   const groupHtml = cl.groups.map((g, gi) => {
-    const rows = FGM.clGroupTable(gi).map((r, i) => {
+    const rows = groupTable(gi).map((r, i) => {
       const t = FGM.teamById(r.tid);
       return `<tr class="${i < 2 ? "zone-cl" : ""} ${r.tid === s.userTid ? "user-row" : ""}">
         <td>${t ? teamLink(t) : "?"}</td><td class="num">${r.p}</td><td class="num">${r.gf - r.ga > 0 ? "+" : ""}${r.gf - r.ga}</td><td class="num"><strong>${r.pts}</strong></td></tr>`;
@@ -479,9 +487,10 @@ function viewEurope() {
   };
   const winner = cl.winner ? FGM.teamById(cl.winner) : null;
   content.innerHTML = `
-    <h1>🏆 Champions League</h1>
-    <p class="sub">${FGM.seasonLabel()} · Group matchdays are played midweek (weeks ${FGM.CL_GROUP_WEEKS.map(w => w + 1).join(", ")}); knockouts in spring · single-leg knockout ties</p>
-    ${winner ? `<div class="card" style="border-color:var(--gold)"><h3>🏆⭐ Champions of Europe</h3><p class="big">${teamLink(winner)}</p></div>` : ""}
+    <h1>${title}</h1>
+    ${tabs}
+    <p class="sub">${FGM.seasonLabel()} · Group matchdays are played midweek (weeks ${FGM.CL_GROUP_WEEKS.map(w => w + 1).join(", ")}); knockouts in spring · single-leg knockout ties · tap any tie to watch it</p>
+    ${winner ? `<div class="card" style="border-color:var(--gold)"><h3>${winTitle}</h3><p class="big">${teamLink(winner)}</p></div>` : ""}
     ${koBlock("Final", cl.final)}
     ${koBlock("Semi-finals", cl.sf)}
     ${koBlock("Quarter-finals", cl.qf)}
@@ -545,7 +554,7 @@ function viewStats() {
       <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Pos</th><th class="num">${label}</th><th class="num">Apps</th></tr></thead>
       <tbody>${rows || "<tr><td colspan='6' class='mute'>No stats yet — sim some matches!</td></tr>"}</tbody></table></div></div>`;
   }).join("");
-  content.innerHTML = `<h1>Stat Leaders</h1><p class="sub">${FGM.seasonLabel()} · all playable leagues + Champions League</p><div class="cards" style="align-items:flex-start">${blocks}</div>`;
+  content.innerHTML = `<h1>Stat Leaders</h1><p class="sub">${FGM.seasonLabel()} · all competitions — leagues, Champions League, Europa League &amp; domestic cups</p><div class="cards" style="align-items:flex-start">${blocks}</div>`;
 }
 
 function viewAllPlayers(args) {
@@ -645,15 +654,16 @@ function viewHistory() {
       ? `<div class="worldxi"><strong>🏆 Domestic cup winners</strong><div class="worldxi-chips">${h.cups.map(c => `<span class="xi-chip">${esc(c.name)}: <strong>${esc(c.winner)}</strong></span>`).join("")}</div></div>`
       : "";
     const intlLine = h.international ? `<p class="mute" style="margin:2px 0 8px">🌍 ${esc(h.international.comp)} ${h.international.year}: <strong>${esc(h.international.winner)}</strong></p>` : "";
+    const bootAw = (label, b) => b ? `<tr><td>${label}</td><td>${esc(b.name)} <span class="mute">${esc(b.abbrev)}</span> <span class="num">${b.value}g</span></td></tr>` : "";
     return `<div class="card">
-      <h3>${FGM.seasonLabel(h.season)}${h.clWinner ? ` — 🏆⭐ ${esc(h.clWinner.name)} won the Champions League` : ""}</h3>
+      <h3>${FGM.seasonLabel(h.season)}${h.clWinner ? ` — 🏆⭐ ${esc(h.clWinner.name)} won the Champions League` : ""}${h.elWinner ? ` · 🏅 ${esc(h.elWinner.name)} won the Europa League` : ""}</h3>
       ${intlLine}
       ${podium}
       <div class="flex">
         <div><strong>League champions</strong><div class="tbl-wrap"><table><tbody>${champs}</tbody></table></div>
         <p class="mute" style="margin-top:6px">Your finish: ${h.userPos}${ord(h.userPos)} in the ${esc(FGM.leagueName(h.userLeague))} (${esc(h.userTeam)})</p></div>
         <div><strong>Individual awards</strong><div class="tbl-wrap"><table><tbody>
-          ${aw("👟 European Golden Boot", h.goldenBoot)}${aw("🎯 Playmaker", h.playmaker)}${aw("🧤 Yashin Trophy", h.goldenGlove)}
+          ${aw("👟 European Golden Boot", h.goldenBoot)}${bootAw("👟🏆 UCL Golden Boot", h.clBoot)}${bootAw("👟🏅 UEL Golden Boot", h.elBoot)}${aw("🎯 Playmaker", h.playmaker)}${aw("🧤 Yashin Trophy", h.goldenGlove)}
           ${aw("🌟 Golden Boy", h.ypoty)}
         </tbody></table></div></div>
       </div>
@@ -736,13 +746,16 @@ function viewSeasonReview() {
       <td>👟 ${nameChip(la.boot)} <span class="num">${la.boot.value}g</span></td>
       <td>⭐ ${nameChip(la.poty)}</td></tr>`;
   }).join("");
+  const bootRow = (label, b) => b ? `<tr><td>${label}</td><td>${nameChip(b)} <span class="num">${b.value}g</span></td></tr>` : "";
   const indiv = [
     ["🏅 Ballon d'Or", h.bdor && h.bdor[0]],
     ["👟 European Golden Boot", h.goldenBoot],
     ["🎯 Playmaker of the Season", h.playmaker],
     ["🧤 Yashin Trophy", h.goldenGlove],
     ["🌟 Golden Boy (best U21)", h.ypoty],
-  ].filter(x => x[1]).map(([label, a]) => `<tr><td>${label}</td><td>${nameChip(a)}</td></tr>`).join("");
+  ].filter(x => x[1]).map(([label, a]) => `<tr><td>${label}</td><td>${nameChip(a)}</td></tr>`).join("")
+    + bootRow("👟🏆 Champions League Golden Boot", h.clBoot)
+    + bootRow("👟🏅 Europa League Golden Boot", h.elBoot);
   const xi = (h.worldXI && h.worldXI.length)
     ? `<div class="worldxi-chips">${h.worldXI.map(w => `<span class="xi-chip">${posBadge(w.pos)} <span class="player-search" data-name="${esc(w.name)}">${esc(w.name)}</span> <span class="mute">${esc(w.abbrev)}</span></span>`).join("")}</div>`
     : "<p class='mute'>—</p>";
@@ -760,6 +773,8 @@ function viewSeasonReview() {
     <p class="sub">The full end-of-season ceremony. Your finish: <strong>${h.userPos}${ord(h.userPos)}</strong> in the ${esc(FGM.leagueName(h.userLeague))} with ${esc(h.userTeam)}.${h.clWinner ? ` · 🏆⭐ ${esc(h.clWinner.name)} won the Champions League.` : ""}</p>
     <div class="cards">
       <div class="card" style="border-color:var(--gold)"><h3>🏅 Ballon d'Or</h3>${podium || "<p class='mute'>—</p>"}</div>
+      ${h.clWinner ? `<div class="card" style="border-color:var(--gold)"><h3>🏆⭐ Champions League</h3><p class="big">${esc(h.clWinner.name)}</p></div>` : ""}
+      ${h.elWinner ? `<div class="card" style="border-color:var(--gold)"><h3>🏅 Europa League</h3><p class="big">${esc(h.elWinner.name)}</p></div>` : ""}
       ${intlCard}
     </div>
     <h2>League champions</h2>
@@ -989,8 +1004,11 @@ function showMatchModal(m) {
   openModal(`
     <h1 style="text-align:center">${esc(h.name)} <span style="background:var(--bg3);padding:2px 14px;border-radius:6px">${m.hg}–${m.ag}</span> ${esc(a.name)}</h1>
     <p class="sub" style="text-align:center">${esc(h.stadium)}${m.pens ? ` · ${esc(FGM.teamName(m.winner))} win on penalties` : ""}${m.comp && m.comp !== FGM.userLeague() ? ` · ${esc(FGM.compName(m.comp))}` : (m.ko ? " · Champions League" : "")}</p>
+    <div class="controls" style="justify-content:center;margin:4px 0 10px"><button class="btn btn-accent" data-watch="1">▶ Watch this match</button></div>
     <h2>Goals</h2>
     ${events || "<p class='mute'>A goalless affair. The purists loved it.</p>"}`);
+  const watch = document.querySelector("[data-watch]");
+  if (watch) watch.addEventListener("click", () => playLiveMatch(m, () => showMatchModal(m)));
 }
 
 // ---------- Global click handling ----------

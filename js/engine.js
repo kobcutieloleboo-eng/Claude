@@ -288,6 +288,7 @@ function newLeague(startSeason, userLeagueId, userClubAbbrev) {
   // Schedules
   for (const id of Object.keys(state.leagues)) buildLeagueSeason(id);
   setupChampionsLeague(true);
+  setupEuropaLeague(true);
   setupCups();
 
   // User club
@@ -391,6 +392,32 @@ function setupChampionsLeague(firstSeason) {
     .map(t => ({ t, r: teamRatings(t.tid).ovr })).sort((a, b) => b.r - a.r).slice(0, 12).map(x => x.t.tid);
   entrants.push(...euro);
 
+  state.cl = buildEuroGroups(entrants.slice(0, 32));
+}
+
+// Europa League: the next tier of clubs — league finishers 5th–7th plus the
+// foreign clubs that missed the Champions League — in the same group+KO format.
+function setupEuropaLeague(firstSeason) {
+  const clSet = new Set(clParticipants());
+  const entrants = [];
+  for (const def of LEAGUE_DEFS) {
+    let tier;
+    if (firstSeason || !state.leagues[def.id].lastTable) {
+      tier = leagueTeams(def.id).map(t => ({ t, r: teamRatings(t.tid).ovr })).sort((a, b) => b.r - a.r).slice(4, 8).map(x => x.t.tid);
+    } else {
+      tier = state.leagues[def.id].lastTable.slice(4, 8).map(r => r.tid).filter(tid => teamById(tid));
+    }
+    entrants.push(...tier.filter(tid => !clSet.has(tid)));
+  }
+  const euro = state.teams.filter(t => t.league === "FOR" && !clSet.has(t.tid))
+    .map(t => ({ t, r: teamRatings(t.tid).ovr })).sort((a, b) => b.r - a.r).map(x => x.t.tid);
+  for (const tid of euro) { if (entrants.length >= 32) break; entrants.push(tid); }
+
+  state.el = buildEuroGroups(entrants.slice(0, 32));
+}
+
+// Draw 32 seeded teams into 8 groups of 4 and build the double round-robin.
+function buildEuroGroups(entrants) {
   const seeded = entrants.map(tid => ({ tid, r: teamRatings(tid).ovr })).sort((a, b) => b.r - a.r).map(x => x.tid);
   const pots = [seeded.slice(0, 8), shuffle(seeded.slice(8, 16)), shuffle(seeded.slice(16, 24)), shuffle(seeded.slice(24, 32))];
   const groups = [];
@@ -410,11 +437,12 @@ function setupChampionsLeague(firstSeason) {
       groupRounds.push(round);
     }
   }
-  state.cl = { groups, groupRounds, stage: "groups", r16: [], qf: [], sf: [], final: [], winner: null };
+  return { groups, groupRounds, stage: "groups", r16: [], qf: [], sf: [], final: [], winner: null };
 }
 
-function clGroupTable(g) {
-  const cl = state.cl;
+function clGroupTable(g) { return euroGroupTable(state.cl, g); }
+function elGroupTable(g) { return euroGroupTable(state.el, g); }
+function euroGroupTable(cl, g) {
   const rows = cl.groups[g].map(tid => ({ tid, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 }));
   const by = {}; rows.forEach(r => by[r.tid] = r);
   for (const round of cl.groupRounds) {
@@ -431,23 +459,28 @@ function clGroupTable(g) {
   return rows;
 }
 
-function simCLWeek(week) {
-  const cl = state.cl;
+function simCLWeek(week) { return simEuroWeek(state.cl, "UCL", "Champions League", 15, week); }
+function simELWeek(week) { return simEuroWeek(state.el, "UEL", "Europa League", 8, week); }
+
+// Generic European-cup week: shared by the Champions League and Europa League,
+// which run the same group→R16→final format on the same midweek slots (a club
+// is only ever in one of the two, so the weeks never clash).
+function simEuroWeek(cl, label, fullName, champPrize, week) {
   if (!cl) return [];
   const out = [];
   const gi = CL_GROUP_WEEKS.indexOf(week);
   if (gi >= 0) {
-    for (const m of cl.groupRounds[gi]) { simMatch(m); out.push(Object.assign({ comp: "UCL" }, m)); }
+    for (const m of cl.groupRounds[gi]) { simMatch(m); out.push(Object.assign({ comp: label }, m)); }
     if (gi === 5) {
       // Groups done → R16 draw
       const winners = [], runners = [];
       for (let g = 0; g < 8; g++) {
-        const tbl = clGroupTable(g);
+        const tbl = euroGroupTable(cl, g);
         winners.push(tbl[0].tid); runners.push(tbl[1].tid);
       }
       for (let i = 0; i < 8; i++) cl.r16.push(Object.assign(match(winners[i], runners[(i + 1) % 8]), { ko: true }));
       cl.stage = "r16";
-      addNews("🏆 Champions League knockout draw is set — Round of 16 in the new year!");
+      addNews(`🏆 ${fullName} knockout draw is set — Round of 16 in the new year!`);
     }
     return out;
   }
@@ -464,7 +497,7 @@ function simCLWeek(week) {
         m.winner = rand() < 0.5 + (hr - ar) / 60 ? m.home : m.away;
       } else m.winner = m.hg > m.ag ? m.home : m.away;
       winners.push(m.winner);
-      out.push(Object.assign({ comp: "UCL" }, m));
+      out.push(Object.assign({ comp: label }, m));
     }
     return winners;
   };
@@ -485,12 +518,32 @@ function simCLWeek(week) {
     cl.winner = w[0];
     cl.stage = "done";
     const t = teamById(cl.winner);
-    if (t) { t.budget = Math.round((t.budget + 15) * 10) / 10; addNews(`🏆⭐ ${t.name} are champions of Europe! They win the Champions League final ${cl.final[0].hg}-${cl.final[0].ag}${cl.final[0].pens ? " (pens)" : ""}.`); }
+    if (t) {
+      t.budget = Math.round((t.budget + champPrize) * 10) / 10;
+      const star = label === "UCL" ? "⭐" : "";
+      addNews(`🏆${star} ${t.name} win the ${fullName}! They beat ${teamName(cl.final[0].home === cl.winner ? cl.final[0].away : cl.final[0].home)} ${cl.final[0].hg}-${cl.final[0].ag}${cl.final[0].pens ? " (pens)" : ""} in the final.`);
+    }
   }
   return out;
 }
 
 function clParticipants() { return state.cl ? state.cl.groups.flat() : []; }
+function elParticipants() { return state.el ? state.el.groups.flat() : []; }
+
+// Top scorer across an entire European competition (from match events).
+function euroGoldenBoot(cl) {
+  if (!cl) return null;
+  const tally = {};
+  const scan = (m) => { for (const e of (m.events || [])) if (e.type === "goal") tally[e.pid] = (tally[e.pid] || 0) + 1; };
+  for (const round of cl.groupRounds) for (const m of round) scan(m);
+  for (const stage of ["r16", "qf", "sf", "final"]) for (const m of cl[stage]) scan(m);
+  let bestPid = null, best = 0;
+  for (const pid in tally) if (tally[pid] > best) { best = tally[pid]; bestPid = pid; }
+  if (bestPid === null) return null;
+  const p = state.players[bestPid];
+  if (!p) return null;
+  return { name: p.name, tid: p.tid, pid: p.pid, value: best };
+}
 
 // ---------- Domestic cups ----------
 // Standard single-elimination bracket seed order for a power-of-two size.
@@ -679,6 +732,7 @@ function seasonLabel(s) { const y = s === undefined ? state.season : s; return `
 function leagueName(id) { const d = LEAGUE_DEFS.find(x => x.id === id); return d ? d.name : (id === "FOR" ? "Abroad" : id); }
 function compName(id) {
   if (id === "UCL") return "Champions League";
+  if (id === "UEL") return "Europa League";
   const c = CUP_DEFS.find(x => x.id === id);
   if (c) return c.name;
   return leagueName(id);
@@ -722,8 +776,8 @@ function teamRatings(tid) {
 // ---------- Match simulation ----------
 function simMatch(m) {
   const hr = teamRatings(m.home), ar = teamRatings(m.away);
-  const hl = clamp(1.36 * Math.exp((hr.att - ar.def - 1) / 14), 0.15, 3.5);
-  const al = clamp(1.05 * Math.exp((ar.att - hr.def - 1) / 14), 0.12, 3.3);
+  const hl = clamp(1.28 * Math.exp((hr.att - ar.def - 1) / 16), 0.15, 2.9);
+  const al = clamp(1.0 * Math.exp((ar.att - hr.def - 1) / 16), 0.12, 2.7);
   m.hg = poisson(hl); m.ag = poisson(al);
   m.events = [];
   attachScorers(m, m.home, m.hg, hr.xi);
@@ -747,7 +801,7 @@ function weightedPick(xi, weights, exp) {
   const opts = [];
   for (const s of xi) {
     if (!s.player) continue;
-    const w = (weights[s.slot] || 1) * Math.pow(1.135, s.player.ovr - 70) * (exp === undefined ? 1 : exp(s.player));
+    const w = (weights[s.slot] || 1) * Math.pow(1.095, s.player.ovr - 70) * (exp === undefined ? 1 : exp(s.player));
     opts.push([s.player, w]); total += w;
   }
   if (!total) return null;
@@ -798,6 +852,9 @@ function simWeek() {
     }
   }
   for (const m of simCLWeek(state.week)) {
+    if (m.home === state.userTid || m.away === state.userTid) results.push(m);
+  }
+  for (const m of simELWeek(state.week)) {
     if (m.home === state.userTid || m.away === state.userTid) results.push(m);
   }
   for (const m of simCupWeek(state.week)) results.push(m);
@@ -861,14 +918,17 @@ function teamMatches(tid) {
       for (const m of round) if (m.home === tid || m.away === tid) out.push({ round: ridx, m, comp: t.league });
     });
   }
-  if (state.cl && clParticipants().includes(tid)) {
-    state.cl.groupRounds.forEach((round, ridx) => {
-      for (const m of round) if (m.home === tid || m.away === tid) out.push({ round: ridx, m, comp: "UCL", week: CL_GROUP_WEEKS[ridx] });
+  const addEuro = (comp, label) => {
+    if (!comp || !comp.groups.flat().includes(tid)) return;
+    comp.groupRounds.forEach((round, ridx) => {
+      for (const m of round) if (m.home === tid || m.away === tid) out.push({ round: ridx, m, comp: label, week: CL_GROUP_WEEKS[ridx] });
     });
     for (const stage of ["r16", "qf", "sf", "final"]) {
-      for (const m of state.cl[stage]) if (m.home === tid || m.away === tid) out.push({ round: -1, m, comp: "UCL", stage });
+      for (const m of comp[stage]) if (m.home === tid || m.away === tid) out.push({ round: -1, m, comp: label, stage });
     }
-  }
+  };
+  addEuro(state.cl, "UCL");
+  addEuro(state.el, "UEL");
   if (state.cups) {
     for (const cup of Object.values(state.cups)) {
       if (cup.league !== t.league) continue;
@@ -905,6 +965,9 @@ function concludeSeason() {
   const poty = pool.slice().sort((a, b) => score(b) - score(a))[0];
   const ypoty = pool.filter(p => p.age <= 21).sort((a, b) => score(b) - score(a))[0];
   const clW = state.cl && state.cl.winner ? teamById(state.cl.winner) : null;
+  const elW = state.el && state.el.winner ? teamById(state.el.winner) : null;
+  const clBoot = euroGoldenBoot(state.cl);
+  const elBoot = euroGoldenBoot(state.el);
 
   // Per-league awards: a Golden Boot (top scorer) and Player of the Season
   // for each of the five playable leagues.
@@ -950,6 +1013,7 @@ function concludeSeason() {
     for (const p of teamPlayers(tid)) { p.trophies = p.trophies || []; p.trophies.push({ season: state.season, comp, kind: "club" }); }
   };
   if (clW) recordTrophy(clW.tid, "Champions League");
+  if (elW) recordTrophy(elW.tid, "Europa League");
   for (const def of LEAGUE_DEFS) { const c = champions[def.id]; if (c) recordTrophy(c.tid, def.name); }
   if (state.cups) for (const cup of Object.values(state.cups)) { if (cup.winner !== null) recordTrophy(cup.winner, cup.name); }
 
@@ -960,6 +1024,9 @@ function concludeSeason() {
     season: state.season,
     champions,
     clWinner: clW ? { name: clW.name, abbrev: clW.abbrev } : null,
+    elWinner: elW ? { name: elW.name, abbrev: elW.abbrev } : null,
+    clBoot: clBoot ? { name: clBoot.name, abbrev: teamAbbrev(clBoot.tid), value: clBoot.value } : null,
+    elBoot: elBoot ? { name: elBoot.name, abbrev: teamAbbrev(elBoot.tid), value: elBoot.value } : null,
     international: intl ? { comp: intl.comp, year: intl.year, winner: intl.winner, runnerUp: intl.runnerUp, goldenBall: intl.goldenBall } : null,
     tables: Object.fromEntries(LEAGUE_DEFS.map(d => [d.id, state.leagues[d.id].lastTable.map(r => ({ pos: r.pos, name: r.name, pts: r.pts, w: r.w, d: r.d, l: r.l, gd: r.gd }))])),
     goldenBoot: boot ? award(boot, boot.stats.goals, "goals") : null,
@@ -981,6 +1048,8 @@ function concludeSeason() {
   state.history.push(entry);
   if (bdorPodium.length) addNews(`🏅 Ballon d'Or: ${bdorPodium[0].name} (${bdorPodium[0].team})! Podium: ${bdorPodium.map((b, i) => `${i + 1}. ${b.name}`).join(", ")}.`);
   if (boot) addNews(`👟 European Golden Boot: ${boot.name} (${teamName(boot.tid)}) with ${boot.stats.goals} goals.`);
+  if (clBoot) addNews(`👟🏆 Champions League Golden Boot: ${clBoot.name} (${teamName(clBoot.tid)}) with ${clBoot.value} goals.`);
+  if (elBoot) addNews(`👟 Europa League Golden Boot: ${elBoot.name} (${teamName(elBoot.tid)}) with ${elBoot.value} goals.`);
   for (const def of LEAGUE_DEFS) {
     const la = leagueAwards[def.id];
     if (la) addNews(`👟 ${def.name} Golden Boot: ${la.boot.name} (${la.boot.abbrev}), ${la.boot.value} goals · Player of the Season: ${la.poty.name}.`);
@@ -1045,9 +1114,12 @@ function advanceToNextSeason() {
     const carry = Math.min(Math.max(0, t.budget), allowance) * 0.4;
     t.budget = clamp(Math.round((allowance * 0.75 + carry) * 10) / 10, 5, allowance * 2);
   }
-  // CL prize money (clubs still in the competition)
+  // European prize money (clubs still in the competitions)
   if (state.cl) {
     for (const tid of clParticipants()) { const t = teamById(tid); if (t) t.budget = Math.round((t.budget + 12 * inflation() * BUDGET_SCALE) * 10) / 10; }
+  }
+  if (state.el) {
+    for (const tid of elParticipants()) { const t = teamById(tid); if (t) t.budget = Math.round((t.budget + 5 * inflation() * BUDGET_SCALE) * 10) / 10; }
   }
 
   // 3. Promotion & relegation per league
@@ -1086,9 +1158,10 @@ function advanceToNextSeason() {
   generateOffersForUser();
   pruneFreeAgents();
 
-  // 10. Schedules + CL + domestic cups
+  // 10. Schedules + CL + Europa League + domestic cups
   for (const id of Object.keys(state.leagues)) buildLeagueSeason(id);
   setupChampionsLeague(false);
+  setupEuropaLeague(false);
   setupCups();
   for (const t of state.teams) calibrateWageBudget(t);
 
@@ -1247,7 +1320,7 @@ function developAllPlayers() {
       perfD = Math.round(perf * 3.2); // -3 .. +5
       if (p.stats.apps >= 30 && perf > 0.3) perfD += 1; // full season of quality
       // A standout season can lift a young player's ceiling.
-      if (a <= 23 && perf >= 0.7) p.pot = clamp(p.pot + ri(1, 3), p.ovr, 97);
+      if (a <= 23 && perf >= 0.7) p.pot = clamp(p.pot + ri(1, 3), p.ovr, 95);
       // A veteran defying age hangs on: cancel some age decline if producing.
       if (a >= 30 && perf > 0.4 && d < 0) d = Math.min(0, d + 2);
     }
@@ -1256,12 +1329,12 @@ function developAllPlayers() {
 
     if (total > 0) {
       // Growth caps at potential — but a genuine career year can nudge just past it.
-      const ceiling = perf !== null && perf >= 1.0 ? Math.min(99, p.pot + 1) : p.pot;
+      const ceiling = perf !== null && perf >= 1.0 ? Math.min(97, p.pot + 1) : p.pot;
       p.ovr = clamp(p.ovr + total, 40, ceiling);
     } else {
       p.ovr = clamp(p.ovr + total, 40, 99);
     }
-    if (a <= 23) p.pot = clamp(p.pot + ri(-2, 2), p.ovr, 97);
+    if (a <= 23) p.pot = clamp(p.pot + ri(-2, 2), p.ovr, 95);
     else p.pot = Math.max(p.ovr, p.pot - 1);
     p.age++;
 
@@ -1696,6 +1769,7 @@ const FGM = {
   userBuy, userSell, rejectOffer, toggleListed,
   contractDemand, evaluateContractOffer, agreeExtension, agreeSigning,
   addNews, teamName, teamAbbrev, clGroupTable, clParticipants,
+  elGroupTable, elParticipants,
   preHistory, honoursFor, clubNameByAbbrev,
   CUP_DEFS, cupParticipant, INTL_WINNERS,
   internationals() { return state.internationals || []; },

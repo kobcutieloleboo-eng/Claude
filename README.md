@@ -22,9 +22,11 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 - ~30 more real clubs in non-playable leagues (Porto, Ajax, Galatasaray, Al Nassr with Ronaldo, Inter Miami with Messi, Neymar's Santos, …) that hold real players, join the Champions League, and sell to anyone — the whole world is your transfer market
 - Per-league promotion/relegation with pools of real lower-division clubs
 
-**Champions League**
-- 32 teams: top four from each playable league plus Europe's best non-playable clubs
-- Real format feel: 8 groups of 4 played midweek between league rounds, then R16 → final (single-leg knockouts), with prize money, news, and history
+**European competitions — Champions League & Europa League**
+- **Champions League**: 32 teams — top four from each playable league plus Europe's best non-playable clubs
+- **Europa League**: a second 32-team competition for the next tier down (league finishers 5th–7th plus the clubs that missed the CL), with its own winner, prize money and history
+- Real format feel: 8 groups of 4 played midweek between league rounds, then R16 → final (single-leg knockouts) in both competitions — a club only ever plays one of the two
+- Every group-stage and knockout tie is **watchable** in the live match viewer, and goals scored in Europe count toward a player's season and career totals
 
 **International tournaments**
 - A **World Cup, Euros or Copa América every summer** on a real 4-year cadence, contested by national teams built from your world's players; single-elim knockout with a winner, runner-up and Golden Ball
@@ -36,7 +38,7 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 
 **Accolades & the record books**
 - A dedicated **Season Review** page: the full year-end ceremony in one place — Ballon d'Or podium, the summer international tournament, all five league champions, a **Golden Boot and Player of the Season for every league**, global awards, cup winners and the FIFPRO World XI
-- End-of-season **Ballon d'Or** (with a three-man podium), **FIFPRO World XI**, per-league **Golden Boots** & **Players of the Season**, **European Golden Boot**, **Yashin Trophy** (best keeper), **Golden Boy** (best U21) and Playmaker award
+- End-of-season **Ballon d'Or** (with a three-man podium), **FIFPRO World XI**, per-league **Golden Boots** & **Players of the Season**, **European Golden Boot**, a **Champions League Golden Boot** and **Europa League Golden Boot**, **Yashin Trophy** (best keeper), **Golden Boy** (best U21) and Playmaker award
 - Real historical honours pre-filled: every real Ballon d'Or, Golden Boot, Champions League winner and league champion from 2000 up to your start season, shown in a "record books" table
 - Every player's profile lists their honours (real ones earned before your save, plus any they win in your world)
 
@@ -63,7 +65,7 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 
 **The full management loop**
 - Poisson-based match engine driven by best-XI attack/defense ratings, with scorers, assists, clean sheets, and injuries
-- **Live match viewer**: "Watch next match" plays your game out minute-by-minute with a running clock, progress bar and goal-by-goal feed (skippable)
+- **Live match viewer**: "Watch next match" plays your game out minute-by-minute with a running clock, progress bar and goal-by-goal feed (skippable) — and any match, including Champions League, Europa League and domestic-cup ties, can be replayed live from its match page
 - **Contract negotiations**: signings and renewals are multi-round talks — the player names wage + length demands, you counter with steppers, they soften or walk; lowball too hard and the deal collapses
 - **Performance-based development, every season**: ratings rise and fall on how a player actually did that year, relative to what's expected for their rating & position — a striker who bangs in 30 climbs, a benched veteran slips, career years can nudge past potential — applied for all seasons, not just the first
 - **Wage budgets**: every club has a weekly wage cap alongside its transfer budget; signings and renewals draw against it and are blocked if they breach it (shown live in the negotiation and on the Finances page)
@@ -102,7 +104,6 @@ Checks league/schedule integrity across all five leagues, realistic goal rates, 
 
 ## Roadmap ideas
 
-- Domestic cups (FA Cup, Copa del Rey) and the Europa League
 - Formation/tactics choices (4-4-2, 3-5-2, pressing intensity)
 - Live match ticker with minute-by-minute events
 - Two-legged Champions League knockouts, coefficient-based qualification
