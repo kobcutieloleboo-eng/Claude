@@ -178,9 +178,12 @@ function generateYouth(tid, stature) {
   const pos = choice(["GK", "CB", "CB", "LB", "RB", "DM", "CM", "CM", "AM", "LW", "RW", "ST", "ST"]);
   const age = ri(16, 18);
   const ovr = ri(46, 58) + Math.round(stature * 1.5);
-  let potBonus = ri(6, 22);
-  if (rand() < 0.12) potBonus += ri(8, 18);
-  const pot = clamp(ovr + potBonus, ovr, 94);
+  // Most academy graduates top out as squad players; genuine world-class
+  // potential is rare, so the elite (90+) tier stays scarce over the decades
+  // instead of ballooning as wave after wave of wonderkids matures.
+  let potBonus = ri(4, 13);
+  if (rand() < 0.05) potBonus += ri(6, 16); // rare generational talent
+  const pot = clamp(ovr + potBonus, ovr, 90);
   return makePlayer(uniqueName(natl), pos, age, ovr, pot, natl, tid, { youth: true, years: ri(2, 4) });
 }
 
@@ -776,8 +779,8 @@ function teamRatings(tid) {
 // ---------- Match simulation ----------
 function simMatch(m) {
   const hr = teamRatings(m.home), ar = teamRatings(m.away);
-  const hl = clamp(1.28 * Math.exp((hr.att - ar.def - 1) / 16), 0.15, 2.9);
-  const al = clamp(1.0 * Math.exp((ar.att - hr.def - 1) / 16), 0.12, 2.7);
+  const hl = clamp(1.28 * Math.exp((hr.att - ar.def - 1) / 16), 0.15, 2.7);
+  const al = clamp(1.0 * Math.exp((ar.att - hr.def - 1) / 16), 0.12, 2.5);
   m.hg = poisson(hl); m.ag = poisson(al);
   m.events = [];
   attachScorers(m, m.home, m.hg, hr.xi);
@@ -794,14 +797,30 @@ function simMatch(m) {
 const SCORE_W = { GK: 0.004, CB: 0.35, RB: 0.28, LB: 0.28, DM: 0.5, CM: 1.6, AM: 4.2, LW: 7.2, RW: 7.2, ST: 10 };
 const ASSIST_W = { GK: 0.05, CB: 0.6, RB: 1.8, LB: 1.8, DM: 1.7, CM: 3.4, AM: 6, LW: 5.2, RW: 5.2, ST: 3 };
 
-// Goals concentrate heavily on the best players: a steep rating curve means a
-// 91-rated forward vastly outshoots a 77-rated one, so scrubs don't top-score.
+// Goals concentrate on the best players via a two-stage rating curve. A gentle
+// base slope keeps mid-tier squad players from top-scoring, while an extra
+// "elite kick" above 87 ovr makes the genuine stars (a Messi/Ronaldo/Haaland)
+// clearly the focal point of their team — the higher his rating, the bigger his
+// share of the team's goals — without letting ordinary players pile up totals.
+const PICK_BASE = 1.09;   // base slope: keeps mid-tier squad players from top-scoring
+const PICK_KICK = 0.9;    // size of the elite bonus (saturates at 1+PICK_KICK)
+const PICK_ELITE = 86;    // rating above which the elite bonus kicks in
+const PICK_SAT = 0.72;    // how fast the bonus saturates
+// The elite bonus SATURATES (approaches 1+PICK_KICK) rather than growing without
+// bound, so a genuine star clearly leads his team as the team's focal point, but
+// when league-wide ratings inflate over many seasons the top players don't all
+// balloon into 70-goal seasons — the bonus a 95 gets is only a little more than
+// a 90 gets, and the base slope plus positional weight decide the rest.
+function ratingWeight(ovr) {
+  const kick = ovr > PICK_ELITE ? 1 + PICK_KICK * (1 - Math.pow(PICK_SAT, ovr - PICK_ELITE)) : 1;
+  return Math.pow(PICK_BASE, ovr - 70) * kick;
+}
 function weightedPick(xi, weights, exp) {
   let total = 0;
   const opts = [];
   for (const s of xi) {
     if (!s.player) continue;
-    const w = (weights[s.slot] || 1) * Math.pow(1.095, s.player.ovr - 70) * (exp === undefined ? 1 : exp(s.player));
+    const w = (weights[s.slot] || 1) * ratingWeight(s.player.ovr) * (exp === undefined ? 1 : exp(s.player));
     opts.push([s.player, w]); total += w;
   }
   if (!total) return null;
@@ -1319,8 +1338,9 @@ function developAllPlayers() {
     } else {
       perfD = Math.round(perf * 3.2); // -3 .. +5
       if (p.stats.apps >= 30 && perf > 0.3) perfD += 1; // full season of quality
-      // A standout season can lift a young player's ceiling.
-      if (a <= 23 && perf >= 0.7) p.pot = clamp(p.pot + ri(1, 3), p.ovr, 95);
+      // A standout season can lift a young player's ceiling — but only a true
+      // outlier reaches the very top, keeping the 90+ tier rare.
+      if (a <= 23 && perf >= 0.85) p.pot = clamp(p.pot + ri(1, 2), p.ovr, 93);
       // A veteran defying age hangs on: cancel some age decline if producing.
       if (a >= 30 && perf > 0.4 && d < 0) d = Math.min(0, d + 2);
     }
@@ -1328,13 +1348,15 @@ function developAllPlayers() {
     let total = d + perfD;
 
     if (total > 0) {
-      // Growth caps at potential — but a genuine career year can nudge just past it.
-      const ceiling = perf !== null && perf >= 1.0 ? Math.min(97, p.pot + 1) : p.pot;
+      // Growth caps at potential — but a genuine career year can nudge just past
+      // it. A hard 95 ceiling keeps even the very best in the real 92-95 band
+      // (no 97-rated goal machines), so nobody balloons to 80-goal seasons.
+      const ceiling = Math.min(95, perf !== null && perf >= 1.0 ? p.pot + 1 : p.pot);
       p.ovr = clamp(p.ovr + total, 40, ceiling);
     } else {
       p.ovr = clamp(p.ovr + total, 40, 99);
     }
-    if (a <= 23) p.pot = clamp(p.pot + ri(-2, 2), p.ovr, 95);
+    if (a <= 23) p.pot = clamp(p.pot + ri(-2, 1), p.ovr, 95);
     else p.pot = Math.max(p.ovr, p.pot - 1);
     p.age++;
 
