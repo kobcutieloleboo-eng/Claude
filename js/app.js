@@ -179,25 +179,61 @@ function playLiveMatch(m, onDone) {
                    : '<button class="btn" data-live-skip="1">Skip to result ⏭</button>'}
       </div>`);
     const skip = document.querySelector("[data-live-skip]");
-    if (skip) skip.addEventListener("click", finish);
+    if (skip) skip.addEventListener("click", skipAll);
     const close = document.querySelector("[data-live-close]");
     if (close) close.addEventListener("click", () => { closeModal(); onDone && onDone(); });
   };
 
   const feedLines = [];
+  const shootout = (m.pens && m.shootout && m.shootout.length) ? m.shootout : null;
+  let pi = 0, reachedFT = false, penStarted = false;
   const kickoff = `<div class="live-line"><span class="live-line-min">0'</span> 🟢 Kick-off at ${esc(h.stadium)}!</div>`;
   feedLines.push(kickoff);
   paint(feedLines.join(""));
 
-  function finish() {
+  // Reach full time: reveal remaining goals (once), then either finish or go to pens.
+  function reachFT() {
     if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
-    // reveal remaining events instantly
+    if (reachedFT) return;
+    reachedFT = true;
     while (ei < events.length) { addEvent(events[ei]); ei++; }
     hg = m.hg; ag = m.ag;
     minute = 90;
+    feedLines.push(`<div class="live-line live-ft"><span class="live-line-min">FT</span> 🏁 Full time: ${esc(h.name)} ${hg}–${ag} ${esc(a.name)}</div>`);
+    if (shootout && !penStarted) { penStarted = true; feedLines.push(`<div class="live-line"><span class="live-line-min">PENS</span> ⚽ Level after 90 — it's a penalty shootout!</div>`); }
+  }
+
+  function addPenLine(k) {
+    const team = FGM.teamById(k.tid);
+    feedLines.push(`<div class="live-line live-pen"><span class="live-line-min">PEN</span> ${k.scored ? "✅" : "❌"} <strong>${esc(k.name)}</strong> (${team ? esc(team.abbrev) : ""}) ${k.scored ? "scores" : "saved!"} <span class="mute">${esc(k.tally)}</span></div>`);
+  }
+  function finishPens() {
     finished = true;
-    feedLines.push(`<div class="live-line live-ft"><span class="live-line-min">FT</span> 🏁 Full time: ${esc(h.name)} ${hg}–${ag} ${esc(a.name)}${m.pens ? ` · ${esc(FGM.teamName(m.winner))} win on penalties` : ""}</div>`);
+    feedLines.push(`<div class="live-line live-ft"><span class="live-line-min">🥅</span> Shootout: ${esc(h.name)} ${m.penHome}–${m.penAway} ${esc(a.name)} · ${esc(FGM.teamName(m.winner))} win!</div>`);
     paint(feedLines.join(""));
+  }
+
+  // Natural end: at 90' go to pens (if any) and tick the kicks one by one.
+  function finish() {
+    reachFT();
+    if (shootout) {
+      paint(feedLines.join(""));
+      liveTimer = setInterval(() => {
+        if (pi >= shootout.length) { clearInterval(liveTimer); liveTimer = null; finishPens(); return; }
+        addPenLine(shootout[pi]); pi++;
+        paint(feedLines.join(""));
+      }, 750);
+    } else {
+      finished = true;
+      paint(feedLines.join(""));
+    }
+  }
+
+  // Skip button: jump straight to the final result (including the whole shootout).
+  function skipAll() {
+    reachFT();
+    if (shootout) { while (pi < shootout.length) { addPenLine(shootout[pi]); pi++; } finishPens(); }
+    else { finished = true; paint(feedLines.join("")); }
   }
 
   function addEvent(ev) {
@@ -1001,12 +1037,22 @@ function showMatchModal(m) {
     const team = FGM.teamById(ev.tid);
     return `<div class="event-line"><span class="event-min">${ev.min}'</span> ⚽ <strong>${esc(ev.name)}</strong> (${team ? esc(team.abbrev) : ""})${esc(ev.text || "")}</div>`;
   }).join("");
+  let pensHtml = "";
+  if (m.pens && m.shootout && m.shootout.length) {
+    const kicks = m.shootout.map(k => {
+      const team = FGM.teamById(k.tid);
+      return `<div class="event-line"><span class="event-min">${k.scored ? "✅" : "❌"}</span> <strong>${esc(k.name)}</strong> <span class="mute">${team ? esc(team.abbrev) : ""}</span> — ${k.scored ? "scored" : "saved"} <span class="mute">(${esc(k.tally)})</span></div>`;
+    }).join("");
+    pensHtml = `<h2>Penalty shootout — ${esc(h.name)} ${m.penHome}–${m.penAway} ${esc(a.name)}</h2>${kicks}`;
+  }
+  const penNote = m.pens ? ` · ${esc(FGM.teamName(m.winner))} win ${m.penHome != null ? `${m.penHome}–${m.penAway} ` : ""}on penalties` : "";
   openModal(`
     <h1 style="text-align:center">${esc(h.name)} <span style="background:var(--bg3);padding:2px 14px;border-radius:6px">${m.hg}–${m.ag}</span> ${esc(a.name)}</h1>
-    <p class="sub" style="text-align:center">${esc(h.stadium)}${m.pens ? ` · ${esc(FGM.teamName(m.winner))} win on penalties` : ""}${m.comp && m.comp !== FGM.userLeague() ? ` · ${esc(FGM.compName(m.comp))}` : (m.ko ? " · Champions League" : "")}</p>
+    <p class="sub" style="text-align:center">${esc(h.stadium)}${penNote}${m.comp && m.comp !== FGM.userLeague() ? ` · ${esc(FGM.compName(m.comp))}` : (m.ko ? " · Champions League" : "")}</p>
     <div class="controls" style="justify-content:center;margin:4px 0 10px"><button class="btn btn-accent" data-watch="1">▶ Watch this match</button></div>
     <h2>Goals</h2>
-    ${events || "<p class='mute'>A goalless affair. The purists loved it.</p>"}`);
+    ${events || "<p class='mute'>A goalless affair. The purists loved it.</p>"}
+    ${pensHtml}`);
   const watch = document.querySelector("[data-watch]");
   if (watch) watch.addEventListener("click", () => playLiveMatch(m, () => showMatchModal(m)));
 }

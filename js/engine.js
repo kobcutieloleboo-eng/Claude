@@ -493,12 +493,7 @@ function simEuroWeek(cl, label, fullName, champPrize, week) {
     const winners = [];
     for (const m of matches) {
       if (m.played) { winners.push(m.winner); continue; }
-      simMatch(m);
-      if (m.hg === m.ag) {
-        const hr = teamRatings(m.home).ovr, ar = teamRatings(m.away).ovr;
-        m.pens = true;
-        m.winner = rand() < 0.5 + (hr - ar) / 60 ? m.home : m.away;
-      } else m.winner = m.hg > m.ag ? m.home : m.away;
+      resolveKnockout(m);
       winners.push(m.winner);
       out.push(Object.assign({ comp: label }, m));
     }
@@ -595,12 +590,7 @@ function simCupWeek(week) {
       if (b === null) { winners.push(a); continue; }
       const m = match(a, b);
       m.cup = cup.id;
-      simMatch(m);
-      if (m.hg === m.ag) {
-        const hr = teamRatings(m.home).ovr, ar = teamRatings(m.away).ovr;
-        m.pens = true;
-        m.winner = rand() < 0.5 + (hr - ar) / 60 ? m.home : m.away;
-      } else m.winner = m.hg > m.ag ? m.home : m.away;
+      resolveKnockout(m);
       winners.push(m.winner);
       roundMatches.push(m);
       if (m.home === state.userTid || m.away === state.userTid) out.push(Object.assign({ comp: cup.id }, m));
@@ -777,10 +767,19 @@ function teamRatings(tid) {
 }
 
 // ---------- Match simulation ----------
-function simMatch(m) {
+// Match scoring: a lower divisor + higher goal cap means stronger teams beat
+// weaker ones by bigger margins (dominant clubs stay dominant, so a 2012 Barça
+// doesn't bow out to Porto), which also feeds the elite scorers more chances.
+const M_DIV = 15.5;   // rating gap sensitivity (lower = bigger favourites)
+const M_HB = 1.22, M_HC = 3.0;   // home base rate & goal cap
+const M_AB = 0.96, M_AC = 2.7;   // away base rate & goal cap
+function simMatch(m, koTie) {
   const hr = teamRatings(m.home), ar = teamRatings(m.away);
-  const hl = clamp(1.28 * Math.exp((hr.att - ar.def - 1) / 16), 0.15, 2.7);
-  const al = clamp(1.0 * Math.exp((ar.att - hr.def - 1) / 16), 0.12, 2.5);
+  // Knockout ties reward class more sharply (a smaller divisor widens the gap),
+  // so the stronger side rarely gets upset over a single leg.
+  const div = koTie ? M_DIV - 5 : M_DIV;
+  const hl = clamp(M_HB * Math.exp((hr.att - ar.def - 1) / div), 0.15, M_HC + (koTie ? 0.9 : 0));
+  const al = clamp(M_AB * Math.exp((ar.att - hr.def - 1) / div), 0.12, M_AC + (koTie ? 0.9 : 0));
   m.hg = poisson(hl); m.ag = poisson(al);
   m.events = [];
   attachScorers(m, m.home, m.hg, hr.xi);
@@ -790,6 +789,51 @@ function simMatch(m) {
   creditAppearances(hr.xi, m.ag === 0);
   creditAppearances(ar.xi, m.hg === 0);
   return m;
+}
+
+// A knockout tie: play the match, and if it's level after 90, go to penalties.
+function resolveKnockout(m) {
+  simMatch(m, true);
+  if (m.hg === m.ag) penaltyShootout(m);
+  else m.winner = m.hg > m.ag ? m.home : m.away;
+  return m.winner;
+}
+
+// Simulate a penalty shootout kick-by-kick. Records the full sequence on the
+// match (m.shootout) plus the tally (m.penHome/m.penAway) so it can be watched
+// and shown in the match report. Better teams (sharper takers, better keeper)
+// win more often, but it's still a lottery — as it should be.
+function penaltyShootout(m) {
+  const hr = teamRatings(m.home), ar = teamRatings(m.away);
+  const gkOvr = (xi) => { const g = xi.find(s => s.slot === "GK"); return g && g.player ? g.player.ovr : 70; };
+  const takerList = (xi) => xi.filter(s => s.player && s.slot !== "GK")
+    .slice().sort((a, b) => (SCORE_W[b.slot] || 0.1) * b.player.ovr - (SCORE_W[a.slot] || 0.1) * a.player.ovr)
+    .map(s => ({ name: s.player.name, pid: s.player.pid, ovr: s.player.ovr }));
+  const hT = takerList(hr.xi), aT = takerList(ar.xi);
+  const hGK = gkOvr(hr.xi), aGK = gkOvr(ar.xi);
+  if (!hT.length || !aT.length) { // safety fallback
+    m.pens = true; m.penHome = m.hg; m.penAway = m.ag;
+    m.winner = rand() < 0.5 + (hr.ovr - ar.ovr) / 60 ? m.home : m.away;
+    return;
+  }
+  // Conversion chance from taker quality vs the opposing keeper.
+  const conv = (taker, gk) => clamp(0.80 + (taker.ovr - 82) / 90 - (gk - 80) / 130, 0.5, 0.94);
+  m.shootout = [];
+  let hs = 0, as = 0, round = 0;
+  while (true) {
+    const ht = hT[round % hT.length], at = aT[round % aT.length];
+    const hScored = rand() < conv(ht, aGK);
+    if (hScored) hs++;
+    m.shootout.push({ tid: m.home, name: ht.name, pid: ht.pid, scored: hScored, tally: `${hs}-${as}` });
+    const aScored = rand() < conv(at, hGK);
+    if (aScored) as++;
+    m.shootout.push({ tid: m.away, name: at.name, pid: at.pid, scored: aScored, tally: `${hs}-${as}` });
+    round++;
+    if (round >= 5 && hs !== as) break;
+    if (round > 24) { if (hs === as) { hs += rand() < 0.5 ? 1 : 0; } break; }
+  }
+  m.pens = true; m.penHome = hs; m.penAway = as;
+  m.winner = hs > as ? m.home : m.away;
 }
 
 // Positional scoring propensity — wide forwards score nearly like strikers
@@ -802,10 +846,11 @@ const ASSIST_W = { GK: 0.05, CB: 0.6, RB: 1.8, LB: 1.8, DM: 1.7, CM: 3.4, AM: 6,
 // "elite kick" above 87 ovr makes the genuine stars (a Messi/Ronaldo/Haaland)
 // clearly the focal point of their team — the higher his rating, the bigger his
 // share of the team's goals — without letting ordinary players pile up totals.
-const PICK_BASE = 1.09;   // base slope: keeps mid-tier squad players from top-scoring
-const PICK_KICK = 0.9;    // size of the elite bonus (saturates at 1+PICK_KICK)
-const PICK_ELITE = 86;    // rating above which the elite bonus kicks in
+const PICK_BASE = 1.09;   // base slope
+const PICK_KICK = 0.9;    // elite bonus (saturates at 1+PICK_KICK)
+const PICK_ELITE = 86;    // rating the elite bonus starts
 const PICK_SAT = 0.72;    // how fast the bonus saturates
+const PICK_STAR = 1.15;   // extra superstar multiplier per ovr above 91 — a prime Messi/Ronaldo pulls clear
 // The elite bonus SATURATES (approaches 1+PICK_KICK) rather than growing without
 // bound, so a genuine star clearly leads his team as the team's focal point, but
 // when league-wide ratings inflate over many seasons the top players don't all
@@ -813,7 +858,8 @@ const PICK_SAT = 0.72;    // how fast the bonus saturates
 // a 90 gets, and the base slope plus positional weight decide the rest.
 function ratingWeight(ovr) {
   const kick = ovr > PICK_ELITE ? 1 + PICK_KICK * (1 - Math.pow(PICK_SAT, ovr - PICK_ELITE)) : 1;
-  return Math.pow(PICK_BASE, ovr - 70) * kick;
+  const star = ovr > 91 ? Math.pow(PICK_STAR, ovr - 91) : 1; // the very best (a prime Messi/Ronaldo) pull further clear
+  return Math.pow(PICK_BASE, ovr - 70) * kick * star;
 }
 function weightedPick(xi, weights, exp) {
   let total = 0;
