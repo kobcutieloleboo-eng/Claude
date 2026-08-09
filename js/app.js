@@ -280,7 +280,7 @@ function render(args) {
     a.classList.toggle("active", a.dataset.view === currentView);
   });
   const views = {
-    dashboard: viewDashboard, roster: viewRoster, standings: viewStandings,
+    dashboard: viewDashboard, roster: viewRoster, tactics: viewTactics, standings: viewStandings,
     fixtures: viewFixtures, europe: viewEurope, cups: viewCups, stats: viewStats, players: viewAllPlayers,
     search: viewSearch, transfers: viewTransfers, finances: viewFinances,
     review: viewSeasonReview, history: viewHistory, news: viewNews, settings: viewSettings,
@@ -301,6 +301,7 @@ function viewDashboard() {
   const userRow = table.find(r => r.tid === s.userTid);
   const t = FGM.teamById(s.userTid);
   const ratings = FGM.teamRatings(s.userTid);
+  const tacMods = ratings.mods;
   const inCL = FGM.clParticipants().includes(s.userTid);
   const inEL = FGM.elParticipants().includes(s.userTid);
 
@@ -336,7 +337,8 @@ function viewDashboard() {
     <p class="sub">${esc(FGM.leagueName(t.league))} · ${FGM.seasonLabel()} · <strong>${userRow.pos}${ord(userRow.pos)}</strong> · ${userRow.pts} pts ·
       XI ${ovrSpan(Math.round(ratings.ovr))} · Form <span class="form-str">${form || "—"}</span>${inCL ? " · <span class='badge badge-gold'>UCL</span>" : inEL ? " · <span class='badge badge-gold'>UEL</span>" : ""}</p>
     <div class="cards">
-      <div class="card"><h3>Next match</h3>${nextHtml}</div>
+      <div class="card"><h3>Next match</h3>${nextHtml}
+        <p class="mute" style="margin-top:8px">${esc(tacMods.formation.name)} · ${esc(tacMods.mentality.name)} · ${esc(tacMods.press.name)} — <a href="#tactics">tactics →</a></p></div>
       <div class="card"><h3>Last result</h3>${lastHtml}</div>
       <div class="card"><h3>Top of the table</h3><div class="tbl-wrap"><table><tbody>${mini}</tbody></table></div>
         <p style="margin-top:8px"><a href="#standings">Full table →</a></p></div>
@@ -412,10 +414,115 @@ function viewRoster() {
         ${rosterTable(players)}
       </div>
       <div style="max-width:380px">
-        <h2>Best XI (4-3-3)</h2>
+        <h2>Best XI (${esc(FGM.formationById(FGM.tacticsFor(s.userTid).formation).name)}) <a href="#tactics" class="mute" style="font-size:12px;font-weight:400">change →</a></h2>
         <div class="tbl-wrap"><table><thead><tr><th>Slot</th><th>Player</th><th>Pos</th><th class="num">Ovr</th><th class="num">Eff</th></tr></thead><tbody>${xiHtml}</tbody></table></div>
       </div>
     </div>`;
+}
+
+// ---------- Tactics ----------
+// Renders the chosen shape as a pitch. Each slot shows who bestXI puts there and
+// how well he fits it, so a square peg in a round hole is visible at a glance.
+function pitchHtml(formation, xi) {
+  const rows = formation.rows.map(row => {
+    const cells = row.map(i => {
+      const sl = xi[i];
+      const p = sl && sl.player;
+      if (!p) return `<div class="pitch-slot empty"><span class="pitch-pos">${esc(formation.slots[i])}</span><span class="pitch-name mute">—</span></div>`;
+      const pct = Math.round((sl.eff / p.ovr) * 100);
+      const cls = pct >= 100 ? "fit-perfect" : pct >= 92 ? "fit-good" : pct >= 82 ? "fit-ok" : "fit-bad";
+      const short = p.name.split(" ").slice(-1)[0];
+      return `<div class="pitch-slot ${cls}" data-pid="${p.pid}" title="${esc(p.name)} — ${p.pos} in a ${esc(formation.slots[i])} slot (${pct}% fit)">
+        <span class="pitch-pos">${esc(formation.slots[i])}</span>
+        <span class="pitch-name">${esc(short)}</span>
+        <span class="pitch-ovr">${sl.eff}</span></div>`;
+    }).join("");
+    return `<div class="pitch-row">${cells}</div>`;
+  }).reverse().join(""); // attacking end at the top
+  return `<div class="pitch">${rows}</div>`;
+}
+
+function signed(v) { const r = Math.round(v * 10) / 10; return (r > 0 ? "+" : "") + r; }
+
+function viewTactics() {
+  const s = FGM.state;
+  const t = FGM.teamById(s.userTid);
+  const tac = FGM.tacticsFor(s.userTid);
+  const chosen = FGM.formationById(tac.formation);
+  const r = FGM.teamRatings(s.userTid);
+  const xi = r.xi;
+
+  // Rate every shape against the squad you actually have, so the page can point
+  // out when your players would suit something else better.
+  const options = FGM.FORMATIONS.map(f => ({ f, ovr: FGM.teamRatings(s.userTid, f.id).ovr }));
+  const bestFit = options.slice().sort((a, b) => b.ovr - a.ovr)[0];
+  const chosenOvr = options.find(o => o.f.id === chosen.id).ovr;
+
+  const formationCards = options.map(({ f, ovr }) => `
+    <button class="tac-opt ${f.id === chosen.id ? "sel" : ""}" data-formation="${f.id}">
+      <span class="tac-opt-head"><strong>${esc(f.name)}</strong><span class="tac-fit">${ovr.toFixed(1)}</span></span>
+      <span class="tac-opt-desc">${esc(f.desc)}</span>
+      <span class="tac-opt-mods">ATT ${signed(f.att)} · DEF ${signed(f.def)}</span>
+    </button>`).join("");
+
+  const mentalityCards = FGM.MENTALITIES.map(m => `
+    <button class="tac-opt ${m.id === tac.mentality ? "sel" : ""}" data-mentality="${m.id}">
+      <span class="tac-opt-head"><strong>${esc(m.name)}</strong></span>
+      <span class="tac-opt-desc">${esc(m.desc)}</span>
+      <span class="tac-opt-mods">ATT ${signed(m.att)} · DEF ${signed(m.def)}</span>
+    </button>`).join("");
+
+  const pressCards = FGM.PRESSES.map(p => `
+    <button class="tac-opt ${p.id === tac.press ? "sel" : ""}" data-press="${p.id}">
+      <span class="tac-opt-head"><strong>${esc(p.name)}</strong></span>
+      <span class="tac-opt-desc">${esc(p.desc)}</span>
+      <span class="tac-opt-mods">ATT ${signed(p.att)} · DEF ${signed(p.def)} · opponent ATT ${signed(p.oppAtt)}${p.injury !== 1 ? ` · injuries ×${p.injury}` : ""}</span>
+    </button>`).join("");
+
+  const misfits = xi.filter(sl => sl.player && sl.eff / sl.player.ovr < 0.9)
+    .map(sl => `${esc(sl.player.name)} (${sl.player.pos}) at ${esc(sl.slot)}`);
+
+  const advice = bestFit.f.id === chosen.id
+    ? `<p class="mute">This is the shape your squad fills best.</p>`
+    : `<p class="mute">Your squad would rate <strong>${(bestFit.ovr - chosenOvr).toFixed(1)}</strong> higher in a <strong>${esc(bestFit.f.name)}</strong>.</p>`;
+
+  content.innerHTML = `
+    <h1>${teamDot(t)} ${esc(t.name)} — Tactics</h1>
+    <p class="sub">Shape, mentality and pressing all feed the match engine. Changes apply from your next match and the AI clubs pick their own every summer.</p>
+    <div class="flex">
+      <div style="max-width:420px">
+        <h2>${esc(chosen.name)}</h2>
+        ${pitchHtml(chosen, xi)}
+        <div class="tac-summary">
+          <div><span class="mute">Attack</span><strong>${r.attAdj.toFixed(1)}</strong><span class="tac-delta">${signed(r.mods.att)}</span></div>
+          <div><span class="mute">Defence</span><strong>${r.defAdj.toFixed(1)}</strong><span class="tac-delta">${signed(r.mods.def)}</span></div>
+          <div><span class="mute">Squad fit</span><strong>${chosenOvr.toFixed(1)}</strong></div>
+        </div>
+        ${advice}
+        ${misfits.length ? `<p class="mute">⚠ Out of position: ${misfits.join(", ")}</p>` : ""}
+      </div>
+      <div>
+        <h2>Formation</h2>
+        <p class="mute" style="margin-bottom:8px">The number beside each shape is how well your current squad fills it.</p>
+        <div class="tac-grid">${formationCards}</div>
+        <h2>Mentality</h2>
+        <div class="tac-grid">${mentalityCards}</div>
+        <h2>Pressing</h2>
+        <div class="tac-grid">${pressCards}</div>
+      </div>
+    </div>`;
+
+  content.querySelectorAll("[data-formation]").forEach(b => b.addEventListener("click", () => applyTactics({ formation: b.dataset.formation })));
+  content.querySelectorAll("[data-mentality]").forEach(b => b.addEventListener("click", () => applyTactics({ mentality: b.dataset.mentality })));
+  content.querySelectorAll("[data-press]").forEach(b => b.addEventListener("click", () => applyTactics({ press: b.dataset.press })));
+  content.querySelectorAll(".pitch-slot[data-pid]").forEach(el =>
+    el.addEventListener("click", () => showPlayerModal(parseInt(el.dataset.pid, 10))));
+}
+
+function applyTactics(patch) {
+  FGM.setTactics(FGM.state.userTid, patch);
+  FGM.save();
+  viewTactics();
 }
 
 function viewStandings(args) {

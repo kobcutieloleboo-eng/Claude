@@ -408,3 +408,63 @@ button, a, select { touch-action: manipulation; }
 .player-search:hover { text-decoration: underline; }
 #search-input { background: var(--bg3); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
 #search-input:focus { outline: none; border-color: var(--accent); }
+
+/* ---------- v2.6: formations & tactics ---------- */
+.pitch {
+  background:
+    linear-gradient(180deg, #17301f 0%, #14291b 100%);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 10px; display: flex; flex-direction: column; gap: 10px;
+  background-image: repeating-linear-gradient(180deg, rgba(255, 255, 255, .028) 0 34px, transparent 34px 68px);
+}
+.pitch-row { display: flex; justify-content: center; gap: 6px; }
+.pitch-slot {
+  flex: 1 1 0; min-width: 0; max-width: 92px;
+  background: var(--bg3); border: 1px solid var(--border); border-radius: 7px;
+  padding: 5px 3px; text-align: center; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  transition: transform .12s, border-color .12s;
+}
+.pitch-slot:hover { transform: translateY(-2px); border-color: var(--accent); }
+.pitch-slot.empty { cursor: default; opacity: .55; }
+.pitch-slot.empty:hover { transform: none; border-color: var(--border); }
+.pitch-pos { font-size: 9.5px; letter-spacing: .4px; color: var(--text-dim); font-weight: 700; }
+.pitch-name { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.pitch-ovr { font-size: 11px; font-weight: 700; }
+/* Fit shading: how well the man suits the slot he's been put in. */
+.pitch-slot.fit-perfect { border-color: #2f6b45; }
+.pitch-slot.fit-perfect .pitch-ovr { color: var(--green); }
+.pitch-slot.fit-good .pitch-ovr { color: var(--text); }
+.pitch-slot.fit-ok { border-color: #6b5a2a; }
+.pitch-slot.fit-ok .pitch-ovr { color: var(--gold); }
+.pitch-slot.fit-bad { border-color: #7a3030; }
+.pitch-slot.fit-bad .pitch-ovr { color: var(--red); }
+
+.tac-summary { display: flex; gap: 10px; margin: 12px 0 8px; }
+.tac-summary > div {
+  flex: 1; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 1px;
+}
+.tac-summary strong { font-size: 18px; }
+.tac-summary .mute { font-size: 11px; }
+.tac-delta { font-size: 11px; color: var(--text-dim); }
+
+.tac-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.tac-opt {
+  text-align: left; background: var(--bg2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;
+  cursor: pointer; font: inherit; display: flex; flex-direction: column; gap: 3px;
+}
+.tac-opt:hover { background: var(--bg3); border-color: #46586e; }
+.tac-opt.sel { border-color: var(--accent); background: #16283a; }
+.tac-opt-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.tac-opt-head strong { font-size: 14px; }
+.tac-fit { font-size: 12px; font-weight: 700; color: var(--accent); }
+.tac-opt-desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.35; }
+.tac-opt-mods { font-size: 10.5px; color: var(--text-dim); letter-spacing: .2px; }
+
+@media (max-width: 760px) {
+  .tac-grid { grid-template-columns: 1fr 1fr; }
+  .pitch-slot { padding: 4px 2px; }
+  .pitch-name { font-size: 10.5px; }
+}

@@ -73,7 +73,6 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 // ---------- Positions ----------
 const POS_GROUP = { GK: "GK", CB: "DF", LB: "DF", RB: "DF", DM: "MF", CM: "MF", AM: "MF", LW: "FW", RW: "FW", ST: "FW" };
-const FORMATION_433 = ["GK", "RB", "CB", "CB", "LB", "DM", "CM", "AM", "RW", "ST", "LW"];
 const POS_FIT = {
   GK: { GK: 1 },
   RB: { RB: 1, LB: 0.9, CB: 0.85, DM: 0.7, RW: 0.7 },
@@ -92,6 +91,79 @@ function fit(slot, pos) {
   if (m && m[pos] !== undefined) return m[pos];
   if (pos === "GK" || slot === "GK") return 0.3;
   return 0.65;
+}
+
+// ---------- Formations & tactics ----------
+// A formation is 11 slots plus a shape bias expressed in *rating points* that are
+// added to the side's attack/defence before the Poisson lambdas. Points (not
+// multipliers) keep the effect legible: the match engine divides by 16 inside an
+// exponential, so ~3 points is worth roughly a 20% swing in expected goals.
+// The rest of a formation's value is emergent — a squad with three good centre
+// backs genuinely rates higher in a back three, because bestXI fills the shape
+// with the players it actually has and out-of-position fits cost rating.
+// `rows` groups slot indices into pitch lines, left to right and back to front,
+// so the UI can draw the shape without hard-coding a layout per formation.
+const FORMATIONS = [
+  { id: "4-3-3", name: "4-3-3", slots: ["GK", "RB", "CB", "CB", "LB", "DM", "CM", "AM", "RW", "ST", "LW"], rows: [[0], [4, 3, 2, 1], [5, 6, 7], [10, 9, 8]], att: 0, def: 0, desc: "A holder behind two, front three stretching the pitch. The modern default." },
+  { id: "4-4-2", name: "4-4-2", slots: ["GK", "RB", "CB", "CB", "LB", "RW", "CM", "CM", "LW", "ST", "ST"], rows: [[0], [4, 3, 2, 1], [8, 7, 6, 5], [9, 10]], att: -1, def: 0.5, desc: "Two banks of four, two up top. Honest and hard to fault." },
+  { id: "4-2-3-1", name: "4-2-3-1", slots: ["GK", "RB", "CB", "CB", "LB", "DM", "DM", "AM", "RW", "ST", "LW"], rows: [[0], [4, 3, 2, 1], [6, 5], [10, 7, 8], [9]], att: -1.5, def: 2, desc: "Double pivot screening the back four — solid, control-first." },
+  { id: "4-4-2d", name: "4-4-2 ◆", slots: ["GK", "RB", "CB", "CB", "LB", "DM", "CM", "CM", "AM", "ST", "ST"], rows: [[0], [4, 3, 2, 1], [5], [7, 6], [8], [9, 10]], att: -0.5, def: 1, desc: "Diamond midfield: crowds the middle, leaves the flanks to the full backs." },
+  { id: "3-5-2", name: "3-5-2", slots: ["GK", "CB", "CB", "CB", "RB", "LB", "DM", "CM", "AM", "ST", "ST"], rows: [[0], [3, 2, 1], [5, 6, 7, 4], [8], [9, 10]], att: 0.5, def: -1, desc: "Back three with wing backs — extra man in midfield, width from deep." },
+  { id: "5-3-2", name: "5-3-2", slots: ["GK", "RB", "CB", "CB", "CB", "LB", "DM", "CM", "CM", "ST", "ST"], rows: [[0], [5, 4, 3, 2, 1], [6, 7, 8], [9, 10]], att: -3.5, def: 3.5, desc: "Five at the back. Hard to break down, short of bodies in attack." },
+  { id: "3-4-3", name: "3-4-3", slots: ["GK", "CB", "CB", "CB", "RB", "LB", "CM", "CM", "RW", "ST", "LW"], rows: [[0], [3, 2, 1], [5, 6, 7, 4], [10, 9, 8]], att: 2, def: -3, desc: "Back three and a front three. Thrilling, and wide open." },
+];
+const DEFAULT_FORMATION = "4-3-3";
+function formationById(id) { return FORMATIONS.find(f => f.id === id) || FORMATIONS.find(f => f.id === DEFAULT_FORMATION); }
+
+// Mentality shifts the same attack/defence points; pressing additionally acts on
+// the *opponent's* attack, which is what makes the choice interesting: a high
+// press wins the ball higher (own attack up) but leaves grass in behind, so both
+// sides score more. Sitting deep strangles the game at both ends.
+const MENTALITIES = [
+  { id: "defensive", name: "Defensive", att: -2.5, def: 2.5, desc: "Sit in, protect the point." },
+  { id: "balanced", name: "Balanced", att: 0, def: 0, desc: "No thumb on the scale." },
+  { id: "attacking", name: "Attacking", att: 2.5, def: -2.5, desc: "Commit bodies forward." },
+  { id: "allout", name: "All-out attack", att: 4.5, def: -5.5, desc: "Chase the game and hang the consequences." },
+];
+const PRESSES = [
+  { id: "low", name: "Low block", att: -1, def: 1, oppAtt: -1.5, injury: 0.9, desc: "Drop off, deny space, make it a slog." },
+  { id: "medium", name: "Medium", att: 0, def: 0, oppAtt: 0, injury: 1, desc: "Press in the middle third." },
+  { id: "high", name: "High press", att: 1.5, def: 0.5, oppAtt: 1.5, injury: 1.2, desc: "Win it high — end-to-end, and it burns legs." },
+];
+function mentalityById(id) { return MENTALITIES.find(m => m.id === id) || MENTALITIES[1]; }
+function pressById(id) { return PRESSES.find(p => p.id === id) || PRESSES[1]; }
+
+// Saves made before tactics existed simply have no `tactics` field; default them
+// lazily here rather than migrating, so old saves keep loading.
+function tacticsFor(tid) {
+  const t = teamById(tid);
+  const tac = (t && t.tactics) || {};
+  return {
+    formation: formationById(tac.formation).id,
+    mentality: mentalityById(tac.mentality).id,
+    press: pressById(tac.press).id,
+  };
+}
+function setTactics(tid, patch) {
+  const t = teamById(tid);
+  if (!t) return null;
+  t.tactics = { ...tacticsFor(tid), ...patch };
+  t.tactics.formation = formationById(t.tactics.formation).id;
+  t.tactics.mentality = mentalityById(t.tactics.mentality).id;
+  t.tactics.press = pressById(t.tactics.press).id;
+  return t.tactics;
+}
+// Combined match modifiers for one side.
+function tacticalMods(tid) {
+  const tac = tacticsFor(tid);
+  const f = formationById(tac.formation), m = mentalityById(tac.mentality), pr = pressById(tac.press);
+  return {
+    att: f.att + m.att + pr.att,
+    def: f.def + m.def + pr.def,
+    oppAtt: pr.oppAtt,
+    injury: pr.injury,
+    formation: f, mentality: m, press: pr,
+  };
 }
 
 // ---------- State ----------
@@ -287,6 +359,7 @@ function newLeague(startSeason, userLeagueId, userClubAbbrev) {
     for (const t of state.teams) fillSquad(t, true);
   }
   for (const t of state.teams) calibrateWageBudget(t);
+  assignAiTactics();
 
   // Schedules
   for (const id of Object.keys(state.leagues)) buildLeagueSeason(id);
@@ -732,28 +805,77 @@ function compName(id) {
 }
 
 // ---------- Team strength ----------
-function bestXI(tid) {
-  const avail = teamPlayers(tid).filter(p => p.injury === 0).sort((a, b) => b.ovr - a.ovr);
-  const slots = FORMATION_433.map(s => ({ slot: s, player: null, eff: 0 }));
-  const gks = avail.filter(p => p.pos === "GK");
-  const outfield = avail.filter(p => p.pos !== "GK");
-  if (gks.length) { slots[0].player = gks[0]; slots[0].eff = gks[0].ovr; }
-  for (const p of outfield) {
-    let best = -1, bestScore = 0;
-    for (let i = 1; i < slots.length; i++) {
-      if (slots[i].player) continue;
-      const score = p.ovr * fit(slots[i].slot, p.pos);
-      if (score > bestScore) { bestScore = score; best = i; }
+// Picks the XI that maximises total effective rating for the shape. Walking the
+// squad in rating order and giving each man his best free slot is not good
+// enough: it fills the eleven from the top of the roster and then strands
+// specialists on the bench, so a 79 central midfielder ends up at right back
+// while a 74 right back who'd rate higher there never gets looked at. Instead
+// every available player is scored against every slot and the best remaining
+// pair is taken each round, then a swap pass cleans up what that misses.
+function bestXI(tid, formationId) {
+  const avail = teamPlayers(tid).filter(p => p.injury === 0).sort((a, b) => b.ovr - a.ovr || a.pid - b.pid);
+  const shape = formationById(formationId || tacticsFor(tid).formation);
+  const slots = shape.slots.map(s => ({ slot: s, player: null, eff: 0 }));
+  if (!avail.length) return slots;
+
+  // A fit keeper always goes in goal; nobody else is close once fit() charges
+  // outfielders 0.3 for the gloves, and it keeps a slot out of the search.
+  let pool = avail;
+  const gk = avail.find(p => p.pos === "GK");
+  let firstSlot = 0;
+  if (gk) {
+    slots[0].player = gk; slots[0].eff = gk.ovr;
+    pool = avail.filter(p => p !== gk);
+    firstSlot = 1;
+  }
+
+  const open = [];
+  for (let i = firstSlot; i < slots.length; i++) open.push(i);
+  // score[p][slotIndex], computed once and reused by both passes.
+  const score = pool.map(p => slots.map(s => p.ovr * fit(s.slot, p.pos)));
+  const takenP = new Array(pool.length).fill(false);
+  const filled = [];
+
+  for (let n = 0; n < open.length && n < pool.length; n++) {
+    let bp = -1, bs = -1, bv = -Infinity;
+    for (let pi = 0; pi < pool.length; pi++) {
+      if (takenP[pi]) continue;
+      for (const si of open) {
+        if (slots[si].player) continue;
+        if (score[pi][si] > bv) { bv = score[pi][si]; bp = pi; bs = si; }
+      }
     }
-    if (best >= 0) { slots[best].player = p; slots[best].eff = Math.round(bestScore); }
-    else if (!slots[0].player) { slots[0].player = p; slots[0].eff = Math.round(p.ovr * 0.3); }
-    if (slots.every(s => s.player)) break;
+    if (bp < 0) break;
+    takenP[bp] = true;
+    slots[bs].player = pool[bp]; slots[bs].eff = Math.round(bv);
+    filled.push({ pi: bp, si: bs });
+  }
+
+  // Greedy can still leave a beneficial swap on the table (it commits to the
+  // single best pair before seeing what that costs elsewhere), so trade slots
+  // between two picked players whenever the pair rates higher the other way.
+  for (let pass = 0; pass < 3; pass++) {
+    let improved = false;
+    for (let a = 0; a < filled.length; a++) {
+      for (let b = a + 1; b < filled.length; b++) {
+        const A = filled[a], B = filled[b];
+        const now = score[A.pi][A.si] + score[B.pi][B.si];
+        const swapped = score[A.pi][B.si] + score[B.pi][A.si];
+        if (swapped > now + 1e-9) {
+          const tmp = A.si; A.si = B.si; B.si = tmp;
+          slots[A.si].player = pool[A.pi]; slots[A.si].eff = Math.round(score[A.pi][A.si]);
+          slots[B.si].player = pool[B.pi]; slots[B.si].eff = Math.round(score[B.pi][B.si]);
+          improved = true;
+        }
+      }
+    }
+    if (!improved) break;
   }
   return slots;
 }
 
-function teamRatings(tid) {
-  const xi = bestXI(tid);
+function teamRatings(tid, formationId) {
+  const xi = bestXI(tid, formationId);
   let att = 0, attW = 0, def = 0, defW = 0, total = 0, count = 0;
   const attWeights = { GK: 0, CB: 0.25, RB: 0.5, LB: 0.5, DM: 0.6, CM: 0.95, AM: 1.15, LW: 1.15, RW: 1.15, ST: 1.25 };
   const defWeights = { GK: 1.25, CB: 1.2, RB: 1.0, LB: 1.0, DM: 0.95, CM: 0.55, AM: 0.2, LW: 0.15, RW: 0.15, ST: 0.1 };
@@ -763,7 +885,51 @@ function teamRatings(tid) {
     def += eff * defWeights[s.slot]; defW += defWeights[s.slot];
     total += eff; count++;
   }
-  return { att: att / attW, def: def / defW, ovr: total / count, xi };
+  const mods = tacticalMods(tid);
+  // `att`/`def` are the squad's raw quality in this shape (used for seeding and
+  // comparisons); `attAdj`/`defAdj` fold in the tactical bias the match uses.
+  return {
+    att: att / attW, def: def / defW, ovr: total / count, xi,
+    attAdj: att / attW + mods.att, defAdj: def / defW + mods.def, mods,
+  };
+}
+
+// AI clubs re-pick a shape every summer: whichever formation their squad fills
+// best (so a club that just bought three centre backs drifts to a back three),
+// nudged by a stable per-club taste so the whole league doesn't converge on one
+// shape. Mentality follows their standing relative to their league, and the
+// bigger clubs press higher. The user's own club is never overwritten.
+function assignAiTactics() {
+  const best = new Map();
+  for (const t of state.teams) {
+    let pick = null, pickScore = -Infinity;
+    for (const f of FORMATIONS) {
+      const taste = (hashCode(t.name + ":" + f.id) % 60) / 100; // 0–0.6 rating points
+      const score = teamRatings(t.tid, f.id).ovr + taste;
+      if (score > pickScore) { pickScore = score; pick = f; }
+    }
+    best.set(t.tid, { formation: pick.id, ovr: teamRatings(t.tid, pick.id).ovr });
+  }
+  // Mentality is assigned by rank within the club's own league rather than by a
+  // rating gap, so it means the same thing in every league and stays symmetric —
+  // roughly as many clubs go for it as sit in, which keeps league-wide scoring on
+  // its existing calibration. The very best clubs play balanced: they control
+  // games rather than chase them, and piling an attacking mentality onto the best
+  // squads is what sends individual scoring records silly.
+  const byLeague = {};
+  for (const t of state.teams) (byLeague[t.league] || (byLeague[t.league] = [])).push(t);
+  for (const group of Object.values(byLeague)) {
+    group.sort((a, b) => best.get(b.tid).ovr - best.get(a.tid).ovr);
+    const n = group.length;
+    group.forEach((t, i) => {
+      if (t.tid === state.userTid) return;
+      const pct = i / n;
+      const mentality = pct < 0.12 ? "balanced" : pct < 0.45 ? "attacking" : pct > 0.72 ? "defensive" : "balanced";
+      const pressRoll = (hashCode(t.name + ":press:" + state.season) % 100) + (t.stature - 3) * 9;
+      const press = pressRoll > 70 ? "high" : pressRoll < 30 ? "low" : "medium";
+      t.tactics = { formation: best.get(t.tid).formation, mentality, press };
+    });
+  }
 }
 
 // ---------- Match simulation ----------
@@ -773,21 +939,31 @@ function teamRatings(tid) {
 const M_DIV = 15.5;   // rating gap sensitivity (lower = bigger favourites)
 const M_HB = 1.22, M_HC = 3.0;   // home base rate & goal cap
 const M_AB = 0.96, M_AC = 2.7;   // away base rate & goal cap
+// Where the attack and defence scales sit relative to each other, in rating
+// points — the single knob for league-wide scoring. It replaces a flat -1
+// offset, retuned when bestXI started fielding specialists in their own
+// positions, which quietly made every defence in the world better.
+const GOAL_TILT = 0.2;
+
 function simMatch(m, koTie) {
   const hr = teamRatings(m.home), ar = teamRatings(m.away);
+  // Each side attacks with its own tactical bias plus whatever space the
+  // opponent's pressing scheme concedes (a high press opens the game both ways).
+  const hAtt = hr.attAdj + ar.mods.oppAtt;
+  const aAtt = ar.attAdj + hr.mods.oppAtt;
   // Knockout ties reward class more sharply (a smaller divisor widens the gap),
   // so the stronger side rarely gets upset over a single leg.
   const div = koTie ? M_DIV - 5 : M_DIV;
-  const hl = clamp(M_HB * Math.exp((hr.att - ar.def - 1) / div), 0.15, M_HC + (koTie ? 0.9 : 0));
-  const al = clamp(M_AB * Math.exp((ar.att - hr.def - 1) / div), 0.12, M_AC + (koTie ? 0.9 : 0));
+  const hl = clamp(M_HB * Math.exp((hAtt - ar.defAdj + GOAL_TILT) / div), 0.15, M_HC + (koTie ? 0.9 : 0));
+  const al = clamp(M_AB * Math.exp((aAtt - hr.defAdj + GOAL_TILT) / div), 0.12, M_AC + (koTie ? 0.9 : 0));
   m.hg = poisson(hl); m.ag = poisson(al);
   m.events = [];
   attachScorers(m, m.home, m.hg, hr.xi);
   attachScorers(m, m.away, m.ag, ar.xi);
   m.events.sort((a, b) => a.min - b.min);
   m.played = true;
-  creditAppearances(hr.xi, m.ag === 0);
-  creditAppearances(ar.xi, m.hg === 0);
+  creditAppearances(hr.xi, m.ag === 0, hr.mods.injury);
+  creditAppearances(ar.xi, m.hg === 0, ar.mods.injury);
   return m;
 }
 
@@ -846,9 +1022,9 @@ const ASSIST_W = { GK: 0.05, CB: 0.6, RB: 1.8, LB: 1.8, DM: 1.7, CM: 3.4, AM: 6,
 // "elite kick" above 87 ovr makes the genuine stars (a Messi/Ronaldo/Haaland)
 // clearly the focal point of their team — the higher his rating, the bigger his
 // share of the team's goals — without letting ordinary players pile up totals.
-const PICK_BASE = 1.09;   // base slope
-const PICK_KICK = 0.9;    // elite bonus (saturates at 1+PICK_KICK)
-const PICK_ELITE = 86;    // rating the elite bonus starts
+const PICK_BASE = 1.09;   // base slope: keeps mid-tier squad players from top-scoring
+const PICK_KICK = 0.35;   // size of the elite bonus (saturates at 1+PICK_KICK)
+const PICK_ELITE = 86;    // rating above which the elite bonus kicks in
 const PICK_SAT = 0.72;    // how fast the bonus saturates
 const PICK_STAR = 1.15;   // extra superstar multiplier per ovr above 91 — a prime Messi/Ronaldo pulls clear
 // The elite bonus SATURATES (approaches 1+PICK_KICK) rather than growing without
@@ -856,6 +1032,11 @@ const PICK_STAR = 1.15;   // extra superstar multiplier per ovr above 91 — a p
 // when league-wide ratings inflate over many seasons the top players don't all
 // balloon into 70-goal seasons — the bonus a 95 gets is only a little more than
 // a 90 gets, and the base slope plus positional weight decide the rest.
+// PICK_KICK came down from 0.9 when bestXI stopped misplacing people: a star
+// striker now actually starts at ST nearly every week instead of being shuffled
+// onto a wing, and that alone put ~9 goals a season on the golden boot. The curve
+// no longer has to manufacture the hierarchy the team sheet already produces —
+// PICK_STAR still gives the genuine GOATs their 50-70+ all-comps seasons.
 function ratingWeight(ovr) {
   const kick = ovr > PICK_ELITE ? 1 + PICK_KICK * (1 - Math.pow(PICK_SAT, ovr - PICK_ELITE)) : 1;
   const star = ovr > 91 ? Math.pow(PICK_STAR, ovr - 91) : 1; // the very best (a prime Messi/Ronaldo) pull further clear
@@ -893,12 +1074,13 @@ function attachScorers(m, tid, goals, xi) {
   }
 }
 
-function creditAppearances(xi, cleanSheet) {
+function creditAppearances(xi, cleanSheet, injuryMult) {
+  const risk = 0.028 * (injuryMult === undefined ? 1 : injuryMult);
   for (const s of xi) {
     if (!s.player) continue;
     s.player.stats.apps++;
     if (cleanSheet && s.slot === "GK") s.player.stats.cs++;
-    if (rand() < 0.028) s.player.injury = ri(1, 7);
+    if (rand() < risk) s.player.injury = ri(1, 7);
   }
 }
 
@@ -1229,6 +1411,7 @@ function advanceToNextSeason() {
   setupEuropaLeague(false);
   setupCups();
   for (const t of state.teams) calibrateWageBudget(t);
+  assignAiTactics();
 
   const ut = teamById(state.userTid);
   addNews(`A new ${seasonLabel()} season kicks off! ${ut.name} start with a £${ut.budget}m transfer kitty.`);
@@ -1843,6 +2026,8 @@ const FGM = {
   internationals() { return state.internationals || []; },
   userCups() { const t = teamById(state.userTid); return state.cups ? Object.values(state.cups).filter(c => c.league === (t ? t.league : "")) : []; },
   POS_GROUP,
+  FORMATIONS, MENTALITIES, PRESSES,
+  formationById, mentalityById, pressById, tacticsFor, setTactics, tacticalMods,
   setUserTid(tid) { state.userTid = tid; },
 };
 

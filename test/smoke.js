@@ -25,6 +25,48 @@ for (const t of s.teams) {
   check(xi.filter(sl => sl.player).length === 11, `${t.name} fields a full XI`);
   check(!xi[0].player || xi[0].player.pos === "GK", `${t.name} has a GK in goal`);
 }
+// ---- Formations & tactics ----
+{
+  for (const f of FGM.FORMATIONS) {
+    check(f.slots.length === 11, `${f.id}: 11 slots`);
+    const flat = f.rows.flat().sort((a, b) => a - b);
+    check(flat.length === 11 && flat.every((v, i) => v === i), `${f.id}: pitch rows cover every slot exactly once`);
+    check(f.slots[0] === "GK", `${f.id}: slot 0 is the keeper`);
+    check(FGM.bestXI(s.userTid, f.id).filter(sl => sl.player).length === 11, `${f.id}: user fields a full XI`);
+  }
+  // Shape must actually change who plays where.
+  const back5 = FGM.bestXI(s.userTid, "5-3-2").filter(sl => sl.slot === "CB").length;
+  check(back5 === 3, `5-3-2 fields three centre backs (${back5})`);
+  check(FGM.bestXI(s.userTid, "4-3-3").filter(sl => sl.slot === "CB").length === 2, "4-3-3 fields two centre backs");
+
+  // bestXI must prefer a specialist over a higher-rated player out of position:
+  // every outfielder should be in a slot he fits at least reasonably well.
+  const xi433 = FGM.bestXI(s.userTid, "4-3-3");
+  const worst = Math.min(...xi433.filter(sl => sl.player).map(sl => sl.eff / sl.player.ovr));
+  check(worst > 0.8, `no badly misplaced player in the XI (worst fit ${(worst * 100).toFixed(0)}%)`);
+
+  // Tactics round-trip and clamp unknown values back to something valid.
+  FGM.setTactics(s.userTid, { formation: "3-4-3", mentality: "attacking", press: "high" });
+  check(FGM.tacticsFor(s.userTid).formation === "3-4-3", "tactics persist");
+  FGM.setTactics(s.userTid, { formation: "nonsense", mentality: "nonsense", press: "nonsense" });
+  const t2 = FGM.tacticsFor(s.userTid);
+  check(t2.formation === "4-3-3" && t2.mentality === "balanced" && t2.press === "medium", "bad tactics fall back to defaults");
+  // Saves written before tactics existed have no field at all.
+  delete FGM.teamById(s.userTid).tactics;
+  check(FGM.tacticsFor(s.userTid).formation === "4-3-3", "missing tactics default cleanly (old saves)");
+
+  // Mentality has to move the match numbers in the direction it claims.
+  const balanced = FGM.teamRatings(s.userTid);
+  FGM.setTactics(s.userTid, { mentality: "allout" });
+  const gung = FGM.teamRatings(s.userTid);
+  check(gung.attAdj > balanced.attAdj && gung.defAdj < balanced.defAdj, "all-out attack trades defence for attack");
+  FGM.setTactics(s.userTid, { mentality: "balanced" });
+
+  check(s.teams.filter(t => t.tactics && t.tactics.formation).length === s.teams.length, "every club starts with a shape");
+  const shapes = new Set(s.teams.map(t => FGM.tacticsFor(t.tid).formation));
+  check(shapes.size >= 3, `AI clubs vary their shapes (${shapes.size} in use)`);
+}
+
 // duplicate real-player check
 {
   const names = {};

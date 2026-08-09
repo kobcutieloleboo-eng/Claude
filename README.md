@@ -28,6 +28,13 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 - Real format feel: 8 groups of 4 played midweek between league rounds, then R16 → final (single-leg knockouts) in both competitions — a club only ever plays one of the two
 - Every group-stage and knockout tie is **watchable** in the live match viewer, and goals scored in Europe count toward a player's season and career totals
 
+**Formations & tactics**
+- Pick from **seven real shapes** — 4-3-3, 4-4-2, 4-2-3-1, a 4-4-2 diamond, 3-5-2, 5-3-2 and 3-4-3 — on a dedicated Tactics page that draws your XI onto a pitch, colour-coded by how well each man suits the slot he's been given
+- Set a **mentality** (defensive → all-out attack) and a **pressing scheme** (low block, medium, high press). A high press wins the ball higher but leaves grass in behind, so both sides score more — and it burns legs, raising your injury risk
+- Every shape is scored against *your* squad, so the page tells you what your players would actually suit: buy three centre backs and a back three starts to look sensible
+- The **AI does the same**: every club re-picks its shape each summer based on the squad it owns, with mentality set by where it sits in its league, so the world plays a genuine mix of formations
+- Team selection now solves for the **best XI across the whole squad**, not just the eleven highest ratings — a specialist right back is picked ahead of a better midfielder shoved out wide
+
 **International tournaments**
 - A **World Cup, Euros or Copa América every summer** on a real 4-year cadence, contested by national teams built from your world's players; single-elim knockout with a winner, runner-up and Golden Ball
 - Real past winners are pre-filled (World Cups 2002–2022, Euros, Copa América) so icons carry their real international titles
@@ -64,7 +71,7 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 - God mode: switch clubs anytime from Settings
 
 **The full management loop**
-- Poisson-based match engine driven by best-XI attack/defense ratings, with scorers, assists, clean sheets, and injuries
+- Poisson-based match engine driven by best-XI attack/defense ratings — shifted by both sides' formation, mentality and pressing — with scorers, assists, clean sheets, and injuries
 - **Live match viewer**: "Watch next match" plays your game out minute-by-minute with a running clock, progress bar and goal-by-goal feed (skippable) — and any match, including Champions League, Europa League and domestic-cup ties, can be replayed live from its match page. Knockout ties level after 90 go to a **penalty shootout you can watch kick-by-kick**, with the full sequence saved to the match report
 - **Realistic hierarchy & dominance**: goals concentrate on each team's genuine focal point — a prime Messi, Ronaldo or Haaland is his side's talisman and racks up 50-70+ across all competitions, while ordinary players don't — and knockout ties reward class, so a dominant club rarely gets upset by a clearly weaker one over a single leg
 - **Contract negotiations**: signings and renewals are multi-round talks — the player names wage + length demands, you counter with steppers, they soften or walk; lowball too hard and the deal collapses
@@ -101,12 +108,12 @@ The engine runs headless under Node:
 node test/smoke.js 5   # simulate 5 full seasons, verify invariants
 ```
 
-Checks league/schedule integrity across all five leagues, realistic goal rates, Champions League completion, promotion/relegation bookkeeping, cross-league transfers, persistence round-trips — plus an era-start scenario asserting Zidane starts 2000 at Juve and follows history to Madrid, and that Messi and Ronaldo debut on schedule.
+Checks league/schedule integrity across all five leagues, realistic goal rates, Champions League completion, promotion/relegation bookkeeping, cross-league transfers, persistence round-trips, every formation fielding a legal XI with nobody badly out of position — plus an era-start scenario asserting Zidane starts 2000 at Juve and follows history to Madrid, and that Messi and Ronaldo debut on schedule.
 
 ## Roadmap ideas
 
-- Formation/tactics choices (4-4-2, 3-5-2, pressing intensity)
-- Live match ticker with minute-by-minute events
+- Manual team selection — override the auto-picked XI player by player
+- In-match tactical changes (chase a game from the touchline)
 - Two-legged Champions League knockouts, coefficient-based qualification
 - Deeper era data (more legends, back-filled pre-start career stats)
 
