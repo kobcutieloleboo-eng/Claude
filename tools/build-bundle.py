@@ -10,7 +10,7 @@ html = io.open(f"{BASE}/index.html", encoding="utf-8").read()
 body = re.search(r"<body>\n(.*?)\n<script", html, re.S).group(1)
 css = io.open(f"{BASE}/css/style.css", encoding="utf-8").read()
 files = ["names.js","players.js","leagues1.js","leagues2.js","world.js",
-         "legends.js","awards.js","engine.js","app.js"]
+         "legends.js","awards.js","crests.js","engine.js","app.js"]
 js = "\n".join(io.open(f"{BASE}/js/{f}", encoding="utf-8").read() for f in files)
 
 # charset MUST come first (within the first 1024 bytes, before any non-ASCII)

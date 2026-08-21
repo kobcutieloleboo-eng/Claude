@@ -28,6 +28,12 @@ Pick one of the 20 real 2025-26 Premier League clubs and go. The game autosaves 
 - Real format feel: 8 groups of 4 played midweek between league rounds, then R16 → final (single-leg knockouts) in both competitions — a club only ever plays one of the two
 - Every group-stage and knockout tie is **watchable** in the live match viewer, and goals scored in Europe count toward a player's season and career totals
 
+**Every club and competition has a badge**
+- All 125 clubs carry a **generated crest** — a shield in the club's real kit colours, with a pattern (stripes, hoops, halves, sash, quarters, chevron) picked by hashing the club name, and its three-letter code at larger sizes
+- Original **emblems for all seven competitions**: Premier League, La Liga, Serie A, Bundesliga, Ligue 1, Champions League and Europa League, on tabs, page headings and match cards
+- Badges appear everywhere clubs do — league tables, the club picker, Europe's group stage, fixtures, player profiles and the top bar
+- They're **drawn as inline SVG, not shipped as images**: real club and competition marks are trademarked and this is a free fan project, the game has to stay a single file with no network requests, and 125 clubs would otherwise mean 125 binaries in a repo that is currently all text
+
 **Formations & tactics**
 - Pick from **seven real shapes** — 4-3-3, 4-4-2, 4-2-3-1, a 4-4-2 diamond, 3-5-2, 5-3-2 and 3-4-3 — on a dedicated Tactics page that draws your XI onto a pitch, colour-coded by how well each man suits the slot he's been given
 - Set a **mentality** (defensive → all-out attack) and a **pressing scheme** (low block, medium, high press). A high press wins the ball higher but leaves grass in behind, so both sides score more — and it burns legs, raising your injury risk
@@ -95,6 +101,7 @@ js/leagues2.js    Bundesliga & Ligue 1 squads + pools
 js/world.js       non-playable-league clubs (transfer market + CL guests)
 js/legends.js     200+ legends with career stints; career paths for modern players
 js/names.js       name pools by nationality for generated players
+js/crests.js      generated club crests + competition emblems (SVG, DOM-free)
 js/engine.js      game engine (world, CL, sim, development, transfers) — DOM-free
 js/app.js         views, routing, actions
 test/smoke.js     headless multi-season + era-start simulation test
@@ -108,7 +115,7 @@ The engine runs headless under Node:
 node test/smoke.js 5   # simulate 5 full seasons, verify invariants
 ```
 
-Checks league/schedule integrity across all five leagues, realistic goal rates, Champions League completion, promotion/relegation bookkeeping, cross-league transfers, persistence round-trips, every formation fielding a legal XI with nobody badly out of position — plus an era-start scenario asserting Zidane starts 2000 at Juve and follows history to Madrid, and that Messi and Ronaldo debut on schedule.
+Checks league/schedule integrity across all five leagues, realistic goal rates, Champions League completion, promotion/relegation bookkeeping, cross-league transfers, persistence round-trips, every formation fielding a legal XI with nobody badly out of position, every club rendering an escaped crest in its own colours — plus an era-start scenario asserting Zidane starts 2000 at Juve and follows history to Madrid, and that Messi and Ronaldo debut on schedule.
 
 ## Roadmap ideas
 

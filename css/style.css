@@ -182,7 +182,6 @@ select, input[type=text], input[type=number] {
 .neg { color: var(--red); }
 .mute { color: var(--text-dim); }
 
-.team-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; border: 1px solid rgba(255,255,255,.25); }
 
 .event-line { padding: 3px 0; font-size: 13px; }
 .event-min { display: inline-block; width: 34px; color: var(--text-dim); }
@@ -219,7 +218,13 @@ select, input[type=text], input[type=number] {
 .toast-D { border-left: 4px solid var(--gold); }
 .toast-L { border-left: 4px solid var(--red); }
 
-.cl-group { min-width: 210px; flex: 1 1 210px; }
+.cl-group { min-width: 232px; flex: 1 1 232px; }
+/* These group cards are the tightest tables in the game — four to a row on
+   desktop. Trim the cell padding and the crest so the club column can hold a
+   readable name without shoving the Pts column out of the card. */
+.cl-group th, .cl-group td { padding: 6px 6px; }
+.cl-group td:first-child { max-width: 124px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cl-group .crest { width: 14px; height: 16px; margin-right: 4px; }
 
 #bottom-nav { display: none; }
 
@@ -467,4 +472,31 @@ button, a, select { touch-action: manipulation; }
   .tac-grid { grid-template-columns: 1fr 1fr; }
   .pitch-slot { padding: 4px 2px; }
   .pitch-name { font-size: 10.5px; }
+}
+
+/* ---------- v2.7: club crests & competition emblems ---------- */
+/* Badges are inline SVG (js/crests.js), so they scale with no image requests. */
+.crest, .emblem { vertical-align: middle; flex-shrink: 0; margin-right: 5px; }
+.crest { filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .45)); }
+.emblem { border-radius: 4px; }
+h1 .crest, h1 .emblem { margin-right: 8px; position: relative; top: -1px; }
+/* Crests inside tables sit on the text baseline better nudged up a hair. */
+td .crest, .team-link .crest, .team-name .crest, .xi-chip .crest { position: relative; top: -1px; }
+
+/* League/competition tabs carrying an emblem need to lay out as a row. */
+.ltab-emb { display: inline-flex; align-items: center; gap: 0; }
+.ltab-emb .emblem { margin-right: 6px; }
+/* The emblems are full-colour, so keep them legible on the active (blue) chip. */
+.ltab.active .emblem { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .8); }
+
+/* Club picker: the crest sits between the colour stripe and the club details. */
+.club-crest { display: flex; align-items: center; padding: 0 2px 0 10px; }
+.club-crest .crest { margin-right: 0; }
+
+#top-team .crest { margin-right: 5px; }
+.confirm-head h1 .crest { top: 0; }
+
+@media (max-width: 760px) {
+  .club-crest { padding: 0 0 0 8px; }
+  .club-crest .crest { width: 30px; height: 35px; }
 }

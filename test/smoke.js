@@ -1,6 +1,7 @@
 // Headless smoke test v2: multi-league world, Champions League, era starts.
 // Usage: node test/smoke.js [seasons]
 const FGM = require("../js/engine.js");
+const Art = require("../js/crests.js");
 
 const seasons = parseInt(process.argv[2] || "3", 10);
 let failures = 0;
@@ -25,6 +26,41 @@ for (const t of s.teams) {
   check(xi.filter(sl => sl.player).length === 11, `${t.name} fields a full XI`);
   check(!xi[0].player || xi[0].player.pos === "GK", `${t.name} has a GK in goal`);
 }
+// ---- Crests & competition emblems ----
+{
+  let bad = 0, unescaped = 0, noColor = 0;
+  for (const t of s.teams) {
+    const svg = Art.clubCrest(t, 40);
+    if (!svg.startsWith("<svg") || !svg.endsWith("</svg>")) bad++;
+    // Club names carry ampersands ("Brighton & Hove Albion") and they land in an
+    // aria-label, so they must arrive escaped.
+    if (/aria-label="[^"]*&(?!amp;|lt;|gt;|quot;)/.test(svg)) unescaped++;
+    if (svg.indexOf(t.colors[0]) === -1) noColor++;
+  }
+  check(bad === 0, `every club renders a crest (${bad} malformed)`);
+  check(unescaped === 0, `crest labels are escaped (${unescaped} raw)`);
+  check(noColor === 0, `crests use the club's own colours (${noColor} missing)`);
+  // Below the text threshold the three-letter code is dropped; above it, kept.
+  const t0 = s.teams[0];
+  check(Art.clubCrest(t0, 16).indexOf("<text") === -1, "tiny crests omit the club code");
+  check(Art.clubCrest(t0, 40).indexOf(t0.abbrev) !== -1, "large crests carry the club code");
+  check(Art.clubCrest(null, 40) === "", "a missing club renders nothing rather than throwing");
+
+  // Every crest relies on the one shared clipPath the page defines.
+  check(Art.SHIELD_DEFS.indexOf('id="fgmShield"') !== -1, "shared shield clipPath is defined");
+  check(Art.clubCrest(t0, 40).indexOf('url(#fgmShield)') !== -1, "crests reference the shared clipPath");
+  const html = require("fs").readFileSync(__dirname + "/../index.html", "utf8");
+  check(html.indexOf('id="fgmShield"') !== -1, "index.html ships the shield clipPath");
+  check(html.indexOf(Art.SHIELD) !== -1, "page clipPath matches the path crests are drawn to");
+
+  for (const id of ["EPL", "LIGA", "SA", "BL", "L1", "UCL", "UEL"]) {
+    check(Art.hasEmblem(id), `${id} has an emblem`);
+    check(Art.compEmblem(id, 30).startsWith("<svg"), `${id} emblem renders`);
+  }
+  check(Art.compEmblem("FAC", 30) === "", "competitions without an emblem render nothing");
+  check(FGM.LEAGUE_DEFS.every(d => Art.hasEmblem(d.id)), "every playable league has an emblem");
+}
+
 // ---- Formations & tactics ----
 {
   for (const f of FGM.FORMATIONS) {
